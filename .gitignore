@@ -16,3 +16,8 @@ threat_assessment.json
 .vscode/
 .antigravity/
 .gemini/
+
+# Legacy and Portfolio (Keep Local Only)
+historical_archive/
+Portfolio/
+Private/
