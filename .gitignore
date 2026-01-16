@@ -1,0 +1,18 @@
+# Environment variables
+.env
+
+# Cache and logs
+__pycache__/
+*.log
+logs/
+.tmp/
+pdf_cache/
+
+# Results
+opportunities.json
+threat_assessment.json
+
+# System files
+.vscode/
+.antigravity/
+.gemini/
