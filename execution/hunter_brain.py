@@ -41,8 +41,13 @@ def analyze_opportunity(opportunity):
         opportunity['remote_friendly'] = ai_analysis.get('remote_friendly', False)
         opportunity['small_business_setaside'] = ai_analysis.get('small_business_setaside', False)
         opportunity['estimated_value'] = ai_analysis.get('estimated_value', 'Not Specified')
-        opportunity['analysis_notes'] = ai_analysis.get('reasoning', '')
-        opportunity['analysis_method'] = "Gemini AI"
+        opportunity['strategic_notes'] = ai_analysis.get('strategic_reasoning', '')
+        
+        # New: Red Team & Immune System
+        opportunity['red_team'] = ai_analysis.get('red_team_findings', {})
+        opportunity['immune_system'] = ai_analysis.get('immune_system_antibody', {})
+        
+        opportunity['analysis_method'] = "Gemini AI (Dual-Track)"
     else:
         # Fallback to keyword analysis
         score = keyword_score(title)

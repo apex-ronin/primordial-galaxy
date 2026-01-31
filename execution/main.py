@@ -98,7 +98,19 @@ def main():
     high_value = [o for o in scored_opportunities if o['fit_label'] == 'High']
     print(f"\n[!] Found {len(high_value)} HIGH priority targets.")
     for h in high_value:
-        print(f"    - {h['title']} (Source: {h['source']})")
+        print(f"\n    --- {h['title']} ---")
+        print(f"    [*] Source: {h['source']}")
+        print(f"    [*] Score: {h['win_probability']} | Fit: {h['fit_label']}")
+        
+        red_team = h.get('red_team', {})
+        if red_team:
+            print(f"    [!] VULNERABILITY: {red_team.get('primary_vector', 'Unknown')}")
+            print(f"    [!] RISK SCORE: {red_team.get('vulnerability_score', 0)}/100")
+        
+        immune = h.get('immune_system', {})
+        if immune:
+            print(f"    🛡  ANTIBODY CLAUSE: {immune.get('clause_title', 'Generated Protection')}")
+            print(f"    > {immune.get('clause_text', '')[:100]}...")
 
 if __name__ == "__main__":
     main()

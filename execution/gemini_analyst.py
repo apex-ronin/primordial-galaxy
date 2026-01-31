@@ -31,24 +31,40 @@ def analyze_rfp(rfp_text, max_chars=30000):
     if len(rfp_text) > max_chars:
         rfp_text = rfp_text[:max_chars] + "\n... [TRUNCATED]"
     
-    prompt = f"""You are analyzing a government RFP document for a small consulting/software firm. Provide a structured analysis.
+    prompt = f"""You are a senior AI Fraud Security Researcher performing a dual-track analysis on a government RFP document. 
 
-Answer these questions based on the RFP text:
+Follow the **Saturation Philosophy**: Combatting fraud through openness and making it too expensive to execute.
 
-1. **Project Type**: Is this primarily for (A) Consulting/Software/Professional Services or (B) Construction/Equipment/Heavy Work?
-2. **Remote Work**: Does the RFP mention or imply that remote work is acceptable? Consider phrases like "on-site required" vs. silence on location.
-3. **Small Business Preference**: Is there a small business set-aside, preference, or goal mentioned?
-4. **Estimated Value**: What is the contract value or budget mentioned? Extract the number if stated, otherwise say "Not Specified".
-5. **Win Probability**: On a scale of 0-100, how suitable is this opportunity for a small consulting/software firm that specializes in remote work and has limited on-site capabilities?
+### Part 1: Strategic Fit (White Hat)
+Analyze if this opportunity is suitable for a small consulting/software firm specializing in remote work.
+
+### Part 2: Red Team Analysis (Black Hat)
+Identify specific vectors where an AI-enabled fraudster (a "Prompt Kiddie") could exploit this contract:
+1. **Gig Platform Outsourcing**: Can the work be trivially sub-contracted offshore?
+2. **Template Farming**: Can AI generate the deliverables with zero human overhead?
+3. **Identity Fraud**: Is there a lack of rigorous human-in-the-loop verification?
+
+### Part 3: Antibody Generation (Immune System)
+Generate a specific, legally-binding RFP clause (the "Antibody") that would prevent the identified fraud vectors by making them too expensive to facilitate.
 
 Return ONLY valid JSON in this exact format (no markdown, no extra text):
 {{
-  "project_type": "Consulting" or "Construction" or "Mixed",
-  "remote_friendly": true or false,
-  "small_business_setaside": true or false,
-  "estimated_value": "$50,000" or "Not Specified",
-  "win_probability": 75,
-  "reasoning": "1-2 sentence explanation of the win probability score"
+  "project_type": "Consulting" | "Construction" | "Mixed",
+  "remote_friendly": true | false,
+  "small_business_setaside": true | false,
+  "estimated_value": "string or Not Specified",
+  "win_probability": 0-100,
+  "strategic_reasoning": "1 sentence explanation",
+  "red_team_findings": {{
+    "vulnerability_score": 0-100,
+    "primary_vector": "string",
+    "exploit_scenario": "How an attacker wins"
+  }},
+  "immune_system_antibody": {{
+    "clause_title": "string",
+    "clause_text": "The actual legally-sounding text to insert into the RFP",
+    "mitigation_target": "Which vector this blocks"
+  }}
 }}
 
 RFP Text:
