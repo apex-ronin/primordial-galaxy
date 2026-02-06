@@ -28,27 +28,22 @@ def search_google(query, num_results=10):
         'num': num_results
     }
 
-    try:
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
-        
-        results = []
-        if 'items' in data:
-            for item in data['items']:
-                result = {
-                    "title": item.get("title"),
-                    "link": item.get("link"),
-                    "snippet": item.get("snippet")
-                }
-                results.append(result)
-                print(f"    [+] Found: {result['title'][:50]}...")
-        
-        return results
-
-    except Exception as e:
-        print(f"[!] Search failed: {e}")
-        return []
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+    data = response.json()
+    
+    results = []
+    if 'items' in data:
+        for item in data['items']:
+            result = {
+                "title": item.get("title"),
+                "link": item.get("link"),
+                "snippet": item.get("snippet")
+            }
+            results.append(result)
+            print(f"    [+] Found: {result['title'][:50]}...")
+    
+    return results
 
 if __name__ == "__main__":
     # Test Search
