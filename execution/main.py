@@ -3,11 +3,12 @@ import os
 from datetime import datetime
 from hunter_eyes import fetch_opportunities
 from hunter_brain import analyze_opportunity
-from discovery_engine import search_google
-from scraper_eldorado import fetch_eldorado_opportunities
+from discovery_engine import search_vertex
+from scraper_csda import fetch_csda_opportunities
 from scraper_sam import fetch_federal_opportunities
 from health_check import run_all_checks
 from orchestrator import Orchestrator
+from grant_hunter import fetch_grant_opportunities, promote_grant_fit
 
 OUTPUT_FILE = "opportunities.json"
 
@@ -32,7 +33,7 @@ def normalize_google_result(results):
 
 def main():
     print("="*60)
-    print("GovTech Hunter v0.5 - Self-Healing & Adaptive")
+    print("GovTech Hunter v0.6 - CSDA Honey Pot Active")
     print("="*60)
     
     # 0. Pre-flight Health Check
@@ -40,48 +41,60 @@ def main():
     if not run_all_checks():
         print("\n[!] Health checks reported issues. Engaging self-healing protocols...")
         # In a real scenario, we might attempt auto-fixes here. 
-        # For now, we proceed with caution, relying on Orchestrator to skip broken modules.
     
     orchestrator = Orchestrator()
     
     # 1. Execution Phase (Parallel-ish execution via Orchestrator)
     print("\n--- PHASE 1: ACQUISITION ---")
     
-    # Define tasks
-    # We pass the function reference and its arguments
-    results_csda = orchestrator.run_module(
+    # 🌟 NEW: CSDA (Honey Pot) - Central Hub for all California Districts
+    results_csda_raw = orchestrator.run_module(
         "CSDA (Honey Pot)", 
-        fetch_opportunities
+        fetch_csda_opportunities
     )
+    results_csda = results_csda_raw.get('data', [])
     
-    results_eldorado = orchestrator.run_module(
-        "El Dorado (Sniper)", 
-        fetch_eldorado_opportunities
-    )
+    # 🏮 DEPRECATED: El Dorado (Sniper) - Replaced by CSDA/Vertex
+    # results_eldorado_raw = orchestrator.run_module(
+    #     "El Dorado (Sniper)", 
+    #     fetch_eldorado_opportunities
+    # )
+    # results_eldorado = results_eldorado_raw.get('data', [])
+    results_eldorado = []
     
-    results_sam = orchestrator.run_module(
+    results_sam_raw = orchestrator.run_module(
         "SAM.gov (The Whale)", 
         fetch_federal_opportunities
     )
+    results_sam = results_sam_raw.get('data', [])
     
     # Google requires arguments
     query = '"special district" "RFP" site:.gov filetype:pdf'
-    results_google_raw = orchestrator.run_module(
+    results_google_raw_packet = orchestrator.run_module(
         "Google Discovery",
-        search_google,
+        search_vertex,
         query,
         num_results=5
     )
+    results_google_raw = results_google_raw_packet.get('data', [])
     
     # Normalization for Google results
     results_google = normalize_google_result(results_google_raw)
+
+    # 1.5 Grant Hunter Market Prototype
+    results_grants_raw = orchestrator.run_module(
+        "Grant Hunter (Foundations)",
+        fetch_grant_opportunities
+    )
+    results_grants = results_grants_raw.get('data', [])
 
     # Consolidate
     all_opportunities = orchestrator.consolidate_results([
         results_csda, 
         results_eldorado, 
         results_sam, 
-        results_google
+        results_google,
+        results_grants
     ])
     
     if not all_opportunities:
@@ -127,6 +140,11 @@ def main():
         if red_team:
             print(f"    [!] VULNERABILITY: {red_team.get('primary_vector', 'Unknown')}")
             print(f"    [!] RISK SCORE: {red_team.get('vulnerability_score', 0)}/100")
+        
+        # Finding AS-04: Display Contact Intelligence
+        contact = h.get('contact')
+        if contact:
+            print(f"    [+] POINT OF CONTACT: {contact}")
 
 if __name__ == "__main__":
     main()

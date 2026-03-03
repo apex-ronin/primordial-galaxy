@@ -6,27 +6,30 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-def check_google_api():
-    print("[*] Checking Google Search API...")
-    api_key = os.getenv("GOOGLE_API_KEY")
-    cx = os.getenv("GOOGLE_CX")
+def check_vertex_search():
+    print("[*] Checking Vertex AI Search API...")
+    project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+    data_store_id = os.getenv("VERTEX_DATA_STORE_ID")
     
-    if not api_key:
-        return False, "Missing GOOGLE_API_KEY"
-    if not cx:
-        return False, "Missing GOOGLE_CX"
+    if not project_id or not data_store_id:
+        return False, "Missing VERTEX configuration in .env"
         
-    url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        'key': api_key,
-        'cx': cx,
-        'q': 'test',
-        'num': 1
-    }
-    
     try:
-        response = requests.get(url, params=params)
-        response.raise_for_status()
+        from google.cloud import discoveryengine_v1beta as discoveryengine
+        client = discoveryengine.SearchServiceClient()
+        serving_config = client.serving_config_path(
+            project=project_id,
+            location="global",
+            data_store=data_store_id,
+            serving_config="default_config",
+        )
+        # Using a minimal request just to verify connectivity
+        request = discoveryengine.SearchRequest(
+            serving_config=serving_config,
+            query="test",
+            page_size=1,
+        )
+        client.search(request)
         return True, "OK"
     except Exception as e:
         return False, str(e)
@@ -80,15 +83,30 @@ def check_gemini_api():
     except Exception as e:
         return False, str(e)
 
+def check_csda_clearinghouse():
+    print("[*] Checking CSDA Clearinghouse...")
+    url = "https://www.csda.net/career-center/rfp-clearinghouse"
+    try:
+        # We just check if we can reach the page. 
+        # Scraper handles the auth wall detection.
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            return True, "OK"
+        else:
+            return False, f"Status: {response.status_code}"
+    except Exception as e:
+        return False, str(e)
+
 def run_all_checks():
     print("="*40)
     print("     SYSTEM HEALTH CHECK")
     print("="*40)
     
     results = {
-        "Google Search": check_google_api(),
+        "Vertex Search": check_vertex_search(),
         "SAM.gov": check_sam_api(),
-        "Gemini AI": check_gemini_api()
+        "Gemini AI": check_gemini_api(),
+        "CSDA (Honey Pot)": check_csda_clearinghouse()
     }
     
     print("-" * 40)

@@ -1,50 +1,47 @@
-# Primordial Galaxy: GovTech Hunter
+# Primordial Galaxy: GovTech Hunter (Cloud V2)
 
-> Production-grade government contract intelligence and Red Team simulation system.
+> Production-grade government contract intelligence and Red Team simulation system. Optimized for **Cloud Stability** and **CSDA Honey Pot** discovery.
 
-## 🏗 3-Layer Architecture
+## 🏗 High-Fidelity Architecture
 
 This repository is organized to separate strategy, orchestration, and execution:
 
 - **Layer 1: Directives (`directives/`)**
-  - Standard Operating Procedures (SOPs) for the system.
-  - [Red Team Analysis SOP](directives/red_team_analysis.md)
+  - [Satellite Dashboard Ops (Cloud V2)](directives/satellite_dashboard_ops.md)
+  - [CSDA Honey Pot SOP](directives/csda_honey_pot.md)
+  - [SSH Troubleshooting Guide](directives/troubleshooting_ssh.md)
 - **Layer 2: Orchestration**
-  - Handled by the AI agent through decision-making and tool calls.
+  - **Non-blocking Server**: FastAPI background tasks for long-running discovery.
+  - **Status Polling**: Real-time feedback loop between Dashboard and Node.
 - **Layer 3: Execution (`execution/`)**
-  - Deterministic Python scripts that perform the heavy lifting.
-  - Core scripts include `main.py` (Gathering) and `red_team_simulation.py` (Analysis).
+  - **Primary Discovery**: `scraper_csda.py` (Honey Pot), `scraper_sam.py` (Whale).
+  - **Filtering**: `discovery_engine.py` (Vertex AI Search Integration).
+  - **Interface**: `satellite_v1/dashboard.html` (Orbital Command UI).
 
-## 📁 Project Structure
+## 🚀 Cloud Operations
 
-- `execution/`: Python tools/scripts.
-- `directives/`: Natural language instruction sets.
-- `historical_archive/`: Logs and files documenting the early development (original "messy" phase).
-- `.tmp/`: Intermediate processing files.
-- `logs/`: Technical execution logs.
+### 1. The SSH Bridge
 
-## 🚀 Getting Started
+All cloud interaction must use the authorized Google account identifier:
 
-1. Set up your environment:
+```bash
+gcloud compute ssh jsn.nlsn@pureswarm-node --zone=us-central1-a --project=pureswarm-fortress
+```
 
-   ```powershell
-   # Copy example env
-   cp .env.example .env
-   # Add your GEMINI_API_KEY
-   ```
+### 2. Launch the Satellite-01 (V2)
 
-2. Run the main discovery engine:
+The dashboard server should be run as a background process on the VM:
 
-   ```powershell
-   python execution/main.py
-   ```
+```bash
+nohup ./venv/bin/python3 execution/satellite_v1/satellite_server.py > satellite_server.log 2>&1 &
+```
 
-3. Run the security analysis:
+Access the Orbital Command Center at [**`http://35.222.150.190:8080`**](http://35.222.150.190:8080).
 
-   ```powershell
-   python execution/red_team_simulation.py
-   ```
+### 3. Verification
 
-## 📜 History
+Use the **"Run Diagnostics"** button in the dashboard to verify the heartbeat of Vertex AI, SAM.gov, Gemini, and the CSDA Clearinghouse.
 
-This project was born out of a rapid development phase aimed at proving the capabilities of agentic systems in the GovTech sector. The full paper trail of its evolution is preserved in `historical_archive/`.
+## 📜 Session History
+
+- **Phase 3.5**: Hardened cloud stability, resolved subprocess "hangs," integrated CSDA specialized scraper, and restored high-fidelity "Orbital" animations.
