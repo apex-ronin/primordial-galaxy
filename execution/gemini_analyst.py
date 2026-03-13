@@ -1,7 +1,9 @@
 import json
 import os
+import time
 from dotenv import load_dotenv
 import google.generativeai as genai
+from shared_utils import antibody_prompt_sanitizer_v1
 
 # Load environment variables
 load_dotenv()
@@ -26,12 +28,19 @@ def analyze_rfp(rfp_text, max_chars=30000):
         
     if not rfp_text:
         return None
-    
-    # Truncate if too long
+
+    # Budget Guard - Finding AS-03 (B-4 fix: guard must run on original input, before truncation)
+    # Rejects absurdly large documents that would cause excessive API cost.
+    MAX_SESSION_CHARS = 100000
+    if len(rfp_text) > MAX_SESSION_CHARS:
+        print(f"    [!!!] COST CAP TRIGGERED: RFP too large ({len(rfp_text)} chars). Rejecting to prevent budget bleed.")
+        return {"status": "rejected", "reason": "cost_cap_exceeded"}
+
+    # Truncate if too long for prompt context
     if len(rfp_text) > max_chars:
         rfp_text = rfp_text[:max_chars] + "\n... [TRUNCATED]"
-    
-    prompt = f"""You are a senior AI Fraud Security Researcher performing a dual-track analysis on a government RFP document. 
+
+    prompt = f"""You are a senior AI Fraud Security Researcher performing a dual-track analysis on a government RFP document.
 
 Follow the **Saturation Philosophy**: Combatting fraud through openness and making it too expensive to execute.
 
@@ -71,59 +80,23 @@ RFP Text:
 {rfp_text}
 """
     
+    # Sanitize input - Finding PA-02
+    rfp_text = antibody_prompt_sanitizer_v1(rfp_text)
+    # Configure and Run
+    genai.configure(api_key=GEMINI_API_KEY)
+    
     try:
-        print(f"    [*] Sending {len(rfp_text)} chars to Gemini API...")
-        
-        genai.configure(api_key=GEMINI_API_KEY)
         model = genai.GenerativeModel('gemini-2.0-flash')
-        
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
-        
         response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
-                temperature=0.1,
-                max_output_tokens=500,
-            ),
-            safety_settings=safety_settings
+                max_output_tokens=1000,
+                response_mime_type="application/json"
+            )
         )
-        
-        # Check if response was blocked
-        if not response.candidates:
-            print(f"    [!] Response blocked or empty")
-            return None
-            
-        # Extract text from response
-        try:
-            response_text = response.text.strip()
-        except ValueError as e:
-            print(f"    [!] Could not extract text: {e}")
-            return None
-        
-        # Remove markdown code blocks if present
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            # Remove first and last line (``` markers)
-            response_text = "\n".join(lines[1:-1]) if len(lines) > 2 else response_text
-        
-        # Parse JSON
-        analysis = json.loads(response_text)
-        
-        print(f"    [+] AI Analysis: {analysis.get('project_type', 'Unknown')}, Prob={analysis.get('win_probability', 0)}")
-        
-        return analysis
-        
-    except json.JSONDecodeError as e:
-        print(f"    [!] Failed to parse AI response as JSON: {e}")
-        print(f"    Raw response: {response_text[:200]}")
-        return None
+        return json.loads(response.text)
     except Exception as e:
-        print(f"    [!] Gemini API call failed: {e}")
+        print(f"    [!] Gemini Analysis Error: {e}")
         return None
 
 if __name__ == "__main__":

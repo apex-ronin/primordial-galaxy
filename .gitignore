@@ -1,6 +1,9 @@
 # Environment variables
 .env
 
+# GCP credentials (never commit)
+gcp-key.json
+
 # Cache and logs
 __pycache__/
 *.log
@@ -8,14 +11,21 @@ logs/
 .tmp/
 pdf_cache/
 
-# Results
+# Runtime data outputs (never commit)
+data/
 opportunities.json
 threat_assessment.json
+saturation_status.json
+health_check*.txt
 
-# System files
+# Local backup archives
+cloud_sync*.zip
+
+# Tool / IDE metadata
 .vscode/
 .antigravity/
 .gemini/
+.claude/
 
 # Legacy and Portfolio (Keep Local Only)
 historical_archive/

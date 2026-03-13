@@ -42,7 +42,7 @@ async def read_dashboard():
 async def check_health():
     try:
         result = subprocess.run(
-            ["python3", "execution/health_check.py"],
+            ["/root/venv/bin/python3", "execution/health_check.py"],
             capture_output=True,
             text=True,
             cwd=os.getcwd()
@@ -56,7 +56,7 @@ def run_saturation_background():
     try:
         with open(LOG_FILE, "w") as log:
             process = subprocess.Popen(
-                ["python3", "execution/main.py"],
+                ["/root/venv/bin/python3", "execution/main.py"],
                 stdout=log,
                 stderr=log,
                 cwd=os.getcwd(),

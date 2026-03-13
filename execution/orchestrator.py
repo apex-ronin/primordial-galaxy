@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import datetime
 import os
+import concurrent.futures
 
 # Configure logging
 logging.basicConfig(
@@ -21,6 +22,8 @@ class Orchestrator:
         self.errors = []
         self.max_retries = 3
         self.backoff_factor = 2
+        self.default_timeout = 30 # Default 30s timeout per module
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
 
     def run_module(self, name, function, *args, **kwargs):
         """
@@ -32,43 +35,50 @@ class Orchestrator:
         attempt = 0
         while attempt < self.max_retries:
             try:
-                # Execute the function
-                data = function(*args, **kwargs)
+                # Execute with pre-emptive timeout guard using ThreadPoolExecutor
+                future = self.executor.submit(function, *args, **kwargs)
+                try:
+                    data = future.result(timeout=self.default_timeout)
+                except concurrent.futures.TimeoutError:
+                    raise TimeoutError(f"Module {name} timed out after {self.default_timeout}s")
                 
-                # Check for empty results if that's considered a failure (optional logic)
+                # Check for empty results
                 if data is None:
                     logger.warning(f"Module {name} returned None")
-                    return []
+                    return {"status": "success", "data": [], "message": "No items found"}
                 
                 count = len(data) if isinstance(data, list) else 1
                 logger.info(f"Module {name} completed successfully. Items: {count}")
                 print(f"    [*] Success. Found {count} items.")
                 
-                # Add source tag if missing
+                # Add source tag 
                 if isinstance(data, list):
                     for item in data:
-                        if 'source' not in item:
+                        if isinstance(item, dict) and 'source' not in item:
                             item['source'] = name
                             
-                return data
+                return {"status": "success", "data": data, "count": count}
 
             except Exception as e:
                 attempt += 1
                 wait_time = self.backoff_factor ** attempt
                 
-                logger.error(f"Module {name} failed (Attempt {attempt}/{self.max_retries}): {str(e)}")
-                print(f"    [!] Error: {str(e)}")
+                error_msg = str(e)
+                logger.error(f"Module {name} failed (Attempt {attempt}/{self.max_retries}): {error_msg}")
+                print(f"    [!] Error: {error_msg}")
                 
-                # Record error pattern
-                self._log_error(name, str(e))
+                # Record error pattern - MANDATORY AUDIT REQUIREMENT
+                self.errors.append({"module": name, "error": error_msg, "attempt": attempt})
+                self._log_error(name, error_msg)
                 
                 if attempt < self.max_retries:
                     print(f"    ... Retrying in {wait_time} seconds ...")
                     time.sleep(wait_time)
                 else:
                     print(f"    [!!!] Module {name} FAILED after {self.max_retries} attempts.")
-                    return []
-        return []
+                    return {"status": "failed", "error": error_msg, "attempts": attempt}
+        
+        return {"status": "failed", "message": "Max retries exceeded"}
 
     def _log_error(self, source, error_msg):
         """
