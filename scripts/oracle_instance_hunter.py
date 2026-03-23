@@ -134,6 +134,13 @@ def try_launch(
 def main() -> None:
     log("Oracle A1 Hunter — run starting")
 
+    # Safe format check — shows first 20 chars only, never exposes full values
+    log(f"  tenancy    : {TENANCY_OCID[:20]}...")
+    log(f"  user       : {USER_OCID[:20]}...")
+    log(f"  fingerprint: {FINGERPRINT[:20]}...")
+    log(f"  region     : {REGION}")
+    log(f"  key present: {bool(PRIVATE_KEY and len(PRIVATE_KEY) > 100)}")
+
     oci.config.validate_config(OCI_CONFIG)
     compute  = oci.core.ComputeClient(OCI_CONFIG)
     identity = oci.identity.IdentityClient(OCI_CONFIG)
