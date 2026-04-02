@@ -31,3 +31,4 @@ cloud_sync*.zip
 historical_archive/
 Portfolio/
 Private/
+!data/legal_corpus/ 

@@ -197,8 +197,9 @@ def main():
             llm_roi = assessment.get('cost_of_fraud_roi', {}).get('roi_multiplier', 0)
             safe_roi = calculate_roi_safe(llm_roi, 1) # Normalizing index
 
-            # B-3 fix: collect immune_system_antibody from assessment
-            antibody = assessment.get('immune_system_antibody', {})
+            # Session C Integration: Call the specialized Antibody Agent
+            import antibody_agent
+            antibody = antibody_agent.generate(opp, assessment)
 
             threat_profile = {
                 "target": opp['title'],
