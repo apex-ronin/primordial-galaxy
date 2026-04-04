@@ -17,6 +17,7 @@ opportunities.json
 threat_assessment.json
 saturation_status.json
 health_check*.txt
+output_models.txt
 
 # Local backup archives
 cloud_sync*.zip

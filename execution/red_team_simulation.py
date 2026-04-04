@@ -4,7 +4,8 @@ import re
 import random
 import time
 from dotenv import load_dotenv
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from shared_utils import antibody_prompt_sanitizer_v1, calculate_roi_safe
 
 # Load environment variables
@@ -15,13 +16,18 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 INPUT_FILE = "opportunities.json"
 OUTPUT_FILE = "threat_assessment.json"
 
-def init_gemini():
-    if not GEMINI_API_KEY:
-        print("[!] GEMINI_API_KEY not found in .env file")
+def init_vertex():
+    """Initializes Vertex AI for authentication (GCP-based auth)."""
+    PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "govtech-control")
+    LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
+    
+    if not PROJECT_ID:
+        print("[!] GOOGLE_CLOUD_PROJECT not found in .env file")
         return False
+        
     # Entropy-based seed for non-deterministic simulation results
     random.seed(int(time.time()))
-    genai.configure(api_key=GEMINI_API_KEY)
+    vertexai.init(project=PROJECT_ID, location=LOCATION)
     return True
 
 def antibody_prompt_sanitizer_v1_local(text):
@@ -137,14 +143,24 @@ Return ONLY valid JSON:
     
     # Pre-calculated local ROI for prompt context (Finding AS-02)
     local_roi = calculate_roi_safe(estimated_payout, estimated_attacker_cost)
+
+    # DEI COMPLIANCE GUARD (March 26, 2026 Executive Order)
+    # Ensure qualifications and performance only.
+    dei_prompt_suffix = """
+    
+    DEI COMPLIANCE (Non-negotiable): Focus ONLY on qualifications, experience, and efficiency. \
+Do NOT use or recommend race, ethnicity, or any identity-based metrics in vendor selection or scoring. \
+Identity-based scoring is a compliance failure under the 2026 DEI Executive Order.
+    """
+    full_prompt = prompt + dei_prompt_suffix
     
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
+            full_prompt,
+            generation_config=GenerationConfig(
                 temperature=0.8, # Higher temperature for creative threat modeling
-                max_output_tokens=1500,
+                max_output_tokens=8192,
                 response_mime_type="application/json"
             )
         )
@@ -163,7 +179,7 @@ def main():
     print("PROJECT BLOOD DIAMOND: RED TEAM SIMULATION")
     print("="*60)
     
-    if not init_gemini():
+    if not init_vertex():
         return
 
     # Load existing opportunities

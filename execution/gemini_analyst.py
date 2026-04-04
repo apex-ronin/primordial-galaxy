@@ -2,14 +2,18 @@ import json
 import os
 import time
 from dotenv import load_dotenv
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from shared_utils import antibody_prompt_sanitizer_v1
 
 # Load environment variables
 load_dotenv()
 
-# Configure Gemini API
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "govtech-control")
+LOCATION = os.getenv("VERTEX_LOCATION", "us-central1") # Default location
+
+# Initialize Vertex AI
+vertexai.init(project=PROJECT_ID, location=LOCATION)
 
 def analyze_rfp(rfp_text, max_chars=30000):
     """
@@ -22,8 +26,9 @@ def analyze_rfp(rfp_text, max_chars=30000):
     Returns:
         dict: Analysis results or None if failed
     """
-    if not GEMINI_API_KEY:
-        print("    [!] GEMINI_API_KEY not found in .env file")
+    # Vertex AI uses ADC, project ID, and location instead of API keys for enterprise auth
+    if not PROJECT_ID:
+        print("    [!] GOOGLE_CLOUD_PROJECT not found in .env file")
         return None
         
     if not rfp_text:
@@ -53,10 +58,10 @@ Identify specific vectors where an AI-enabled fraudster (a "Prompt Kiddie") coul
 2. **Template Farming**: Can AI generate the deliverables with zero human overhead?
 3. **Identity Fraud**: Is there a lack of rigorous human-in-the-loop verification?
 
-### Part 3: Antibody Generation (Immune System)
-Generate a specific, legally-binding RFP clause (the "Antibody") that would prevent the identified fraud vectors by making them too expensive to facilitate.
+**DEI COMPLIANCE (Non-negotiable)**: Focus ONLY on qualifications, experience, and efficiency. Do NOT use or recommend race, ethnicity, or any identity-based metrics in vendor selection or scoring. Identity-based scoring is a compliance failure under the 2026 DEI Executive Order.
 
-Return ONLY valid JSON in this exact format (no markdown, no extra text):
+### Part 3: Antibody Generation (Immune System)
+Generate a specific, legally-binding RFP clause (the "Antibody") that would prevent the identified fraud vectors by making them too expensive to facilitate. Use 'The Actual Legally-Sounding Text' only. Focus on performance verification.
 {{
   "project_type": "Consulting" | "Construction" | "Mixed",
   "remote_friendly": true | false,
@@ -82,21 +87,24 @@ RFP Text:
     
     # Sanitize input - Finding PA-02
     rfp_text = antibody_prompt_sanitizer_v1(rfp_text)
-    # Configure and Run
-    genai.configure(api_key=GEMINI_API_KEY)
     
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(
             prompt,
-            generation_config=genai.types.GenerationConfig(
-                max_output_tokens=1000,
+            generation_config=GenerationConfig(
+                max_output_tokens=8192,
                 response_mime_type="application/json"
             )
         )
         return json.loads(response.text)
     except Exception as e:
-        print(f"    [!] Gemini Analysis Error: {e}")
+        import traceback
+        print(f"    [!] Vertex AI Analysis Error: {e}")
+        try:
+            print(f"    [!] Raw Response: {response.text}")
+        except Exception:
+            pass
         return None
 
 if __name__ == "__main__":

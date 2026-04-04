@@ -1,7 +1,8 @@
 import json
 import os
 import random
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from typing import Dict, Any, List
 
 # --- Configuration ---
@@ -36,11 +37,10 @@ def generate(opportunity: Dict[str, Any], threat_assessment: Dict[str, Any]) -> 
     roi_multiplier = threat_assessment.get('cost_of_fraud_roi', {}).get('roi_multiplier', 5)
     title = opportunity.get('title', 'Unknown Project')
 
-    # Ensure genai is configured (in case global config didn't propagate)
-    if not genai.get_model('models/gemini-2.0-flash'):
-        api_key = os.getenv("GEMINI_API_KEY")
-        if api_key:
-            genai.configure(api_key=api_key)
+    # Initialize Vertex AI if not already done
+    PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "govtech-control")
+    LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
+    vertexai.init(project=PROJECT_ID, location=LOCATION)
     
     # 2. Retrieval Gate
     relevant_legal_text = _retrieve_relevant_clauses(vector)
@@ -71,11 +71,21 @@ def generate(opportunity: Dict[str, Any], threat_assessment: Dict[str, Any]) -> 
     }}
     """
     
+    # DEI COMPLIANCE GUARD (March 26, 2026 Executive Order)
+    dei_prompt_suffix = """
+    
+    DEI COMPLIANCE (Non-negotiable): Focus ONLY on qualifications, experience, and efficiency. \
+Do NOT use or recommend race, ethnicity, or any identity-based metrics. \
+Compliance is material to the government's payment obligation.
+    """
+    full_prompt = prompt + dei_prompt_suffix
+    
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(
-            prompt, 
-            generation_config=genai.types.GenerationConfig(
+            full_prompt, 
+            generation_config=GenerationConfig(
+                max_output_tokens=8192,
                 response_mime_type="application/json"
             )
         )
@@ -114,10 +124,8 @@ def generate(opportunity: Dict[str, Any], threat_assessment: Dict[str, Any]) -> 
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
-    api_key = os.getenv("GEMINI_API_KEY")
-    print(f"[*] Debug: API Key found: {'Yes' if api_key else 'No'}")
-    if api_key:
-        genai.configure(api_key=api_key)
+    if PROJECT_ID:
+        vertexai.init(project=PROJECT_ID, location=LOCATION)
     
     # Test stub
     test_opp = {"title": "Lake County Engineering"}
