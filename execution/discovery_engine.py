@@ -21,7 +21,12 @@ def search_vertex(query, num_results=10):
     print(f"[*] Searching Vertex AI Search for: '{query}'...")
     
     # Initialize client
-    client = discoveryengine.SearchServiceClient()
+    client_options = (
+        {"api_endpoint": f"{LOCATION}-discoveryengine.googleapis.com"}
+        if LOCATION != "global"
+        else None
+    )
+    client = discoveryengine.SearchServiceClient(client_options=client_options)
 
     # The full resource name of the search engine serving config
     serving_config = client.serving_config_path(

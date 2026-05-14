@@ -6,6 +6,11 @@ Government contract intelligence + red team simulation system.
 Scrapes public procurement sources → analyzes via Vertex AI → generates red team threats + antibody clauses.
 Domain specialization layer of R.O.N.I.N. / JARVIS.
 
+## Core Operating Principles (NEW)
+1. **Commander's Intent + Semantic Hard-Stops:** Never rely solely on `pytest` passing as proof of correctness. Understand the "why" of every task. Every task has Semantic Hard-Stops — if you hit one, STOP and ask the user.
+2. **Trust but Verify:** No substantive commit ships without peer review. Do not blindly push without approval or spot check.
+3. **Primary Source Inline:** Any regulatory citation (OMB, FAR, DFARS, etc.) MUST carry the primary source URL in a code comment.
+
 ## Session Protocol — FOLLOW EVERY SESSION
 
 ### Session Open (first 5 minutes)
