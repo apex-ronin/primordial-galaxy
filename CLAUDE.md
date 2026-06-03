@@ -94,7 +94,7 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 ## Source of Truth Files
 
 - **This session:** `primordial_galaxy_roadmap.md` (project root)
-- **Cross-project:** `C:\Users\Jnel9\Workspaces\APEX_RONIN_FUNCTIONAL_ROADMAP.md`
+- **Cross-project:** `C:\Users\jnel9\OneDrive\Workspaces\APEX_RONIN_FUNCTIONAL_ROADMAP.md` (path updated 2026-06-02 — use STATE.md as ground truth)
 - **directives/ files:** ARCHIVED — historical reference only
 
 ## Model Preferences
