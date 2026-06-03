@@ -46,21 +46,22 @@ def fetch_csda_opportunities():
             
             items = page.evaluate("""() => {
                 const results = [];
-                // CSDA / Higher Logic usually uses a specific structure for their 'Clearinghouse'
-                const rfpLinks = Array.from(document.querySelectorAll('a')).filter(a => 
-                    a.innerText.includes('RFP') || a.innerText.includes('RFQ') || a.innerText.includes('District')
-                );
-                
-                rfpLinks.forEach(link => {
-                    const title = link.innerText.trim();
-                    const href = link.href;
-                    // Grab surrounding text for snippet
-                    const container = link.closest('div') || link.parentElement;
-                    const snippet = container ? container.innerText.substring(0, 200).replace(/\\n/g, ' ') : "";
-                    
-                    if (title.length > 5) {
-                        results.push({ title, link: href, snippet });
-                    }
+                // Bug 5 fix: require title length > 20 and exclude exact nav-menu labels
+                const NAV_LABELS = ['RFP Clearinghouse', 'About Special Districts',
+                                    'Learn About Districts', 'Special Districts Map'];
+                const rfpLinks = Array.from(document.querySelectorAll('a')).filter(function(a) {
+                    var t = a.innerText.trim();
+                    if (NAV_LABELS.indexOf(t) !== -1) return false;
+                    if (t.length <= 20) return false;
+                    return t.indexOf('RFP') !== -1 || t.indexOf('RFQ') !== -1 || t.indexOf('District') !== -1;
+                });
+
+                rfpLinks.forEach(function(link) {
+                    var title = link.innerText.trim();
+                    var href = link.href;
+                    var container = link.closest('div') || link.parentElement;
+                    var snippet = container ? container.innerText.substring(0, 200).replace(/\\n/g, ' ') : '';
+                    results.push({ title: title, link: href, snippet: snippet });
                 });
                 return results;
             }""")

@@ -10,18 +10,21 @@ def analyze_opportunity(opportunity):
     link = opportunity['link']
     
     # 1. Get Content (Title + PDF Text if available)
-    full_text = title
+    # Bug 6 fix: seed full_text with title + snippet so non-PDF sources exceed the
+    # 100-char threshold and get AI analysis instead of falling back to keywords.
+    snippet = opportunity.get('snippet', '')
+    full_text = (title + " " + snippet).strip()
     pdf_status = "No PDF"
-    
+
     if link.lower().endswith('.pdf'):
         print(f"    [Brain] Downloading PDF for analysis: {title[:30]}...")
         text, error = get_pdf_text(link)
         if text:
-            full_text = text  # Use full PDF text for AI
+            full_text = text  # Full PDF text always wins
             pdf_status = "PDF Analyzed"
         else:
             pdf_status = f"PDF Error: {error}"
-    
+
     # 2. Try AI Analysis (if we have content)
     ai_analysis = None
     if len(full_text) > 100:  # Only worth sending to AI if we have real content
