@@ -6,4 +6,5 @@ fastapi==0.115.8
 uvicorn==0.34.0
 google-cloud-aiplatform==1.71.0
 google-cloud-discoveryengine==0.13.1
-anthropic>=0.105.0  # AnthropicVertex used by antibody_agent.py — was missing from requirements
+anthropic>=0.105.0
+openai>=1.0.0       # Venice API + LM Studio local (both OpenAI-compatible endpoints)

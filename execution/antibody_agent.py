@@ -1,154 +1,198 @@
+"""
+Antibody Agent — legal clause drafting pipeline.
+
+Formerly used AnthropicVertex (Vertex AI endpoint). Swapped to Anthropic API directly
+after GCP teardown 2026-06-06. Corpus retrieval now uses local JSON files.
+
+M-26-04 compliance wedge is mandatory on LLM-context opportunities.
+Primary source — M-26-04: https://www.whitehouse.gov/wp-content/uploads/2025/12/M-26-04-Increasing-Public-Trust-in-Artificial-Intelligence-Through-Unbiased-AI-Principles-1.pdf
+"""
+
+import glob
 import json
 import os
-import random
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
-from anthropic import AnthropicVertex
+from dotenv import load_dotenv
+from llm_client import complete as llm_complete
 from typing import Dict, Any, List
-from .discovery_engine import search_vertex
 
-# --- Configuration ---
-# Use absolute paths relative to the script location
+load_dotenv()
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORPUS_DIR = os.path.join(BASE_DIR, "data", "legal_corpus")
-FAR_FILE = os.path.join(CORPUS_DIR, "far_clauses.json")
-STATE_FILE = os.path.join(CORPUS_DIR, "state_clauses.json")
 
-def _load_corpus(file_path: str) -> List[Dict[str, Any]]:
-    if not os.path.exists(file_path):
-        return []
-    with open(file_path, 'r') as f:
-        return json.load(f)
 
 def _retrieve_relevant_clauses(vector: str) -> List[str]:
-    """Retrieve legal clause text matching the identified threat vector via Vertex AI Search."""
-    results = search_vertex(query=vector, num_results=5)
-    return [r['snippet'] for r in results]
+    """
+    Retrieve legal clause text matching the identified threat vector from local corpus files.
+
+    Replaces Vertex AI Search (dead post-GCP teardown). Uses keyword match on the
+    'vector' field in each clause record — exact same field the corpus was built with.
+    Falls back to partial word overlap if no direct match found.
+    """
+    vector_lower = vector.lower()
+    vector_words = set(w for w in vector_lower.replace(",", " ").split() if len(w) > 3)
+
+    direct_matches = []
+    fuzzy_matches = []
+
+    corpus_files = glob.glob(os.path.join(CORPUS_DIR, "*.json"))
+    for fpath in corpus_files:
+        try:
+            with open(fpath, "r") as f:
+                clauses = json.load(f)
+            if not isinstance(clauses, list):
+                continue
+            for clause in clauses:
+                clause_vector = clause.get("vector", "").lower()
+                clause_text = clause.get("clause_text", "")
+                if not clause_text:
+                    continue
+                if vector_lower in clause_vector or clause_vector in vector_lower:
+                    direct_matches.append(clause_text)
+                elif vector_words & set(clause_vector.split()):
+                    fuzzy_matches.append(clause_text)
+        except Exception:
+            continue
+
+    results = direct_matches + fuzzy_matches
+    return results[:5]  # Top 5 — same limit as Vertex Search had
+
 
 def generate(opportunity: Dict[str, Any], threat_assessment: Dict[str, Any]) -> Dict[str, Any]:
     """
     The main interface for the Antibody Agent. Implements Session B Pipeline.
-    """
-    # 1. Pipeline Input & Context
-    vector = threat_assessment.get('primary_vector', 'General Fraud')
-    roi_multiplier = threat_assessment.get('cost_of_fraud_roi', {}).get('roi_multiplier', 5)
-    title = opportunity.get('title', 'Unknown Project')
 
-    # Initialize Vertex AI if not already done
-    PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "govtech-control")
-    LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
-    vertexai.init(project=PROJECT_ID, location=LOCATION)
-    
-    # 2. Retrieval Gate
+    Returns a dict with clause_title, clause_text, specificity_score, far_reference,
+    validation_status, and economic_calibration.
+    """
+    vector = threat_assessment.get("primary_vector", "General Fraud")
+    roi_multiplier = threat_assessment.get("cost_of_fraud_roi", {}).get("roi_multiplier", 5)
+    title = opportunity.get("title", "Unknown Project")
+
+    # 1. Retrieval Gate — local corpus
     relevant_legal_text = _retrieve_relevant_clauses(vector)
-    
-    # M-26-04 Policy Wedge Detection (Item 6)
-    llm_keywords = ['llm', 'generative ai', 'large language model', 'chatbot', 'ai-assisted', 'claude', 'gpt', 'gemini']
+
+    # 2. M-26-04 Policy Wedge Detection (Item 6)
+    # Primary source: https://www.whitehouse.gov/wp-content/uploads/2025/12/M-26-04-Increasing-Public-Trust-in-Artificial-Intelligence-Through-Unbiased-AI-Principles-1.pdf
+    llm_keywords = [
+        "llm", "generative ai", "large language model", "chatbot",
+        "ai-assisted", "claude", "gpt", "gemini", "artificial intelligence",
+    ]
     is_llm_context = any(kw in title.lower() or kw in vector.lower() for kw in llm_keywords)
-    
-    policy_context = ""
+
+    m26_policy_snippet = ""
     if is_llm_context:
-        print("[*] LLM Context Detected. Pulling M-26-04 Policy Layer...")
-        policy_results = search_vertex(query="M-26-04 vendor disclosure requirements", num_results=3)
-        policy_context = "\n".join([f"- POLICY: {r['snippet']}" for r in policy_results])
-        if not policy_context:
-            print("[!] WARNING: No M-26-04 policy found in corpus. Proceeding with caution.")
+        print("[*] LLM Context Detected — injecting M-26-04 policy layer...")
+        m26_clauses = _retrieve_relevant_clauses("vendor disclosure llm ai transparency")
+        m26_policy_snippet = "\n".join(f"- POLICY: {c}" for c in m26_clauses[:3])
+        if not m26_policy_snippet:
+            # Hardcoded fallback — core M-26-04 requirements
+            m26_policy_snippet = (
+                "- POLICY (M-26-04, Dec 2025): Vendor must provide Acceptable Use Policy (AUP) "
+                "per deployed LLM, model/data cards, end-user feedback mechanism, and 72-hour "
+                "incident reporting for violative outputs. Enhanced transparency required for "
+                "high-stakes use cases."
+            )
 
-    corpus_context = "\n".join([f"- {txt}" for txt in relevant_legal_text[:3]]) # Top 3
-    if policy_context:
-        corpus_context += "\n" + policy_context
-    
-    # 3. Drafter (LLM Session)
-    # Using Anthropic Claude Sonnet for drafting via Vertex AI
+    corpus_context = "\n".join(f"- {t}" for t in relevant_legal_text[:3])
+    if m26_policy_snippet:
+        corpus_context += "\n" + m26_policy_snippet
+
+    # 3. Drafter
     prompt = f"""You are a Specialized Antibody Agent. Draft a high-specificity RFP clause.
-    
-    THREAT VECTOR: {vector}
-    FRAUD ROI: {roi_multiplier}x
-    OPPORTUNITY: {title}
-    
-    LEGAL CORPUS CONTEXT (Use terminology from these if applicable):
-    {corpus_context}
-    
-    CRITERIA:
-    - Must be a 'Procurement Shield' clause.
-    - Specificity over boilerplate: Mention concrete verification steps (e.g. bi-weekly live screenings).
-    - Economic Burden: The verification cost must be high enough to break the {roi_multiplier}x ROI.
-    - M-26-04 Compliance Wedge (Mandatory): Ensure vendor must disclose Acceptable Use Policies (AUP), provide model/data cards, implement a feedback mechanism, and adhere to 72-hour incident reporting requirements.
-    
-    Return JSON:
-    {{
-        "clause_title": "string",
-        "clause_text": "3-5 sentences",
-        "far_reference": "Specific FAR/CA PCC number from context",
-        "rationale": "Why this blocks {vector}"
-    }}
-    """
-    
-    # DEI COMPLIANCE GUARD (March 26, 2026 Executive Order)
-    dei_prompt_suffix = """
-    
-    DEI COMPLIANCE (Non-negotiable): Focus ONLY on qualifications, experience, and efficiency. \
-Do NOT use or recommend race, ethnicity, or any identity-based metrics. \
-Compliance is material to the government's payment obligation.
-    """
-    full_prompt = prompt + dei_prompt_suffix
-    
-    try:
-        client = AnthropicVertex(project_id=PROJECT_ID, region="us-east5")
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=8192,
-            system="You are a JSON-only API. Output strictly valid JSON. Do not include markdown formatting or backticks.",
-            messages=[
-                {"role": "user", "content": full_prompt}
-            ]
-        )
-        
-        raw_text = response.content[0].text
-        if "```json" in raw_text:
-            raw_text = raw_text.split("```json")[1].split("```")[0]
-        elif "```" in raw_text:
-            raw_text = raw_text.split("```")[1].split("```")[0]
 
-        draft = json.loads(raw_text.strip())
+THREAT VECTOR: {vector}
+FRAUD ROI: {roi_multiplier}x
+OPPORTUNITY: {title}
+
+LEGAL CORPUS CONTEXT (use terminology from these where applicable):
+{corpus_context}
+
+CRITERIA:
+- Must be a 'Procurement Shield' clause.
+- Specificity over boilerplate: mention concrete verification steps (e.g. bi-weekly live screenings).
+- Economic Burden: verification cost must break the {roi_multiplier}x ROI.
+- M-26-04 Compliance Wedge (mandatory if LLM context): vendor must disclose AUP, model/data cards, feedback mechanism, and adhere to 72-hour incident reporting.
+
+Return ONLY valid JSON — no markdown, no backticks:
+{{
+    "clause_title": "string",
+    "clause_text": "3-5 sentences",
+    "far_reference": "Specific FAR/CA clause number from context if available",
+    "rationale": "Why this blocks {vector}"
+}}
+
+DEI COMPLIANCE (Non-negotiable): Focus ONLY on qualifications, experience, and efficiency. \
+Do NOT use race, ethnicity, or identity-based metrics. Compliance is material to payment obligation.
+"""
+
+    try:
+        raw = llm_complete(
+            prompt,
+            system="You are a JSON-only API. Output strictly valid JSON. No markdown, no code blocks, no backticks.",
+            mode="precise",
+        )
+        if not raw:
+            return _emergency_failsafe(vector)
+        if "```" in raw:
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.split("```")[0]
+
+        draft = json.loads(raw.strip())
         if isinstance(draft, list):
             draft = draft[0] if draft else {}
-        
+
         # 4. Specificity & Calibration Gate
-        # Heuristic validation for the POC (can be upgraded to second LLM pass)
-        clause_len = len(draft.get('clause_text', ''))
-        has_mechanism = any(word in draft.get('clause_text', '').lower() for word in ['verify', 'submit', 'monitor', 'audit', 'screen'])
-        
+        clause_text = draft.get("clause_text", "")
+        clause_len = len(clause_text)
+        has_mechanism = any(
+            w in clause_text.lower()
+            for w in ["verify", "submit", "monitor", "audit", "screen", "report"]
+        )
         specificity_score = 40 + (min(clause_len, 400) // 10) + (20 if has_mechanism else 0)
-        
+
         return {
-            "clause_title": draft.get('clause_title'),
-            "clause_text": draft.get('clause_text'),
+            "clause_title": draft.get("clause_title"),
+            "clause_text": clause_text,
             "specificity_score": specificity_score,
-            "far_reference": draft.get('far_reference'),
+            "far_reference": draft.get("far_reference"),
+            "rationale": draft.get("rationale"),
             "validation_status": "VALIDATED" if specificity_score >= 75 else "NEEDS_REVIEW",
-            "economic_calibration": "ENFORCED" if (specificity_score/10) > roi_multiplier else "POTENTIAL_BLEED"
+            "economic_calibration": (
+                "ENFORCED" if (specificity_score / 10) > roi_multiplier else "POTENTIAL_BLEED"
+            ),
         }
-        
+
     except Exception as e:
         import traceback
         error_msg = f"[!] Antibody Generation Error: {e}\n{traceback.format_exc()}"
-        with open(os.path.join(BASE_DIR, "antibody_agent_error.log"), "a") as log:
-            log.write(error_msg + "\n" + "="*40 + "\n")
-        return {
-            "clause_title": "Emergency Default Antibody",
-            "clause_text": f"Contractor must prove work authorship via live periodic audit sessions for {vector}.",
-            "specificity_score": 50,
-            "validation_status": "EMERGENCY_FAILSAFE"
-        }
+        log_path = os.path.join(BASE_DIR, "antibody_agent_error.log")
+        with open(log_path, "a") as log:
+            log.write(error_msg + "\n" + "=" * 40 + "\n")
+        return _emergency_failsafe(vector)
+
+
+def _emergency_failsafe(vector: str) -> Dict[str, Any]:
+    return {
+        "clause_title": "Emergency Default Antibody",
+        "clause_text": (
+            f"Contractor must prove work authorship via live periodic audit sessions for {vector}. "
+            "All deliverables must be accompanied by documented human-in-the-loop verification evidence."
+        ),
+        "specificity_score": 50,
+        "validation_status": "EMERGENCY_FAILSAFE",
+        "far_reference": "FAR 52.203-13",
+    }
+
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
-    if PROJECT_ID:
-        vertexai.init(project=PROJECT_ID, location=LOCATION)
-    
-    # Test stub
-    test_opp = {"title": "Lake County Engineering"}
-    test_threat = {"primary_vector": "Outsourcing Fraud"}
+    test_opp = {"title": "AI-Assisted Procurement Analysis Services"}
+    test_threat = {
+        "primary_vector": "Template Farming & Gig Platform Outsourcing",
+        "cost_of_fraud_roi": {"roi_multiplier": 8},
+    }
     print(json.dumps(generate(test_opp, test_threat), indent=2))

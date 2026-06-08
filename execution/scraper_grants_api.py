@@ -3,8 +3,13 @@ Federal grant discovery via public REST APIs.
 No browser required. No API key required.
 
 Sources:
-  - grants.gov  — POST /v1/api/search  (all federal agencies)
-  - sbir.gov    — GET  /solicitations   (SBIR/STTR across DHS, NSF, DARPA, DOD, DOE)
+  - grants.gov  — POST /v1/api/search2  (all federal agencies, unauthenticated public endpoint)
+                  Docs: https://www.grants.gov/api/api-guide
+                  NOTE: /v1/api/search (old) now returns 401. search2 is the current public endpoint.
+  - sbir.gov    — GET  /public/api/solicitations  (SBIR/STTR across DHS, NSF, DARPA, DOD, DOE)
+                  Docs: https://www.sbir.gov/api
+                  NOTE: api.sbir.gov (old domain) is dead. Correct host: api.www.sbir.gov
+                  NOTE: API returns 429 during maintenance windows — scraper degrades gracefully.
 
 Policy context (OMB M-26-04 / GSAR 552.239-7001 / WAS):
   Filters and keywords are tuned to surface AI, cybersecurity, and critical-infrastructure
@@ -14,8 +19,14 @@ Policy context (OMB M-26-04 / GSAR 552.239-7001 / WAS):
 import time
 import requests
 
-GRANTS_GOV_URL = "https://api.grants.gov/v1/api/search"
-SBIR_API_URL = "https://api.sbir.gov/solicitations"
+# Verified 2026-06-08: /v1/api/search now returns 401. search2 is the live public endpoint.
+# Docs: https://www.grants.gov/api/api-guide
+GRANTS_GOV_URL = "https://api.grants.gov/v1/api/search2"
+
+# Verified 2026-06-08: api.sbir.gov DNS is dead. Correct host confirmed via sbir.gov/api docs.
+# Returns 429 during maintenance windows — degrades gracefully to [].
+# Docs: https://www.sbir.gov/api
+SBIR_API_URL = "https://api.www.sbir.gov/public/api/solicitations"
 
 # Search terms ordered by expected relevance to Apex Ronin's focus areas
 SEARCH_TERMS = [
@@ -59,6 +70,8 @@ def search_grants_gov(keyword: str, rows: int = 25) -> list:
     try:
         resp = requests.post(GRANTS_GOV_URL, json=payload, timeout=20)
         resp.raise_for_status()
+        # search2 response: data.oppHits — field names differ slightly from old /search:
+        #   agency (not agencyName), no awardCeiling/synopsis inline (detail requires fetchopportunity)
         hits = resp.json().get("data", {}).get("oppHits", [])
         results = []
         for opp in hits:
@@ -66,9 +79,9 @@ def search_grants_gov(keyword: str, rows: int = 25) -> list:
                 "title": opp.get("title", "Unknown"),
                 "source": "grants.gov",
                 "link": f"https://www.grants.gov/search-results-detail/{opp.get('id', '')}",
-                "snippet": (opp.get("synopsis") or "")[:300],
+                "snippet": (opp.get("synopsis") or "")[:300],  # not returned inline by search2; placeholder
                 "value": _normalize_value(opp.get("awardCeiling") or opp.get("awardFloor", 0)),
-                "agency": opp.get("agencyName", "Unknown"),
+                "agency": opp.get("agency", "Unknown"),         # search2 uses "agency" not "agencyName"
                 "deadline": opp.get("closeDate", "TBD"),
                 "grant_id": opp.get("number", ""),
             })

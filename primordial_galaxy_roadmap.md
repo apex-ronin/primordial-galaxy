@@ -1,13 +1,13 @@
 # PRIMORDIAL GALAXY — Roadmap
 
-**Owner:** Jay Nelson | **Updated:** 2026-06-03 | **Session:** v12
+**Owner:** Jay Nelson | **Updated:** 2026-06-06 | **Session:** v13
 
 ---
 
 ## STATUS
 
-Core pipeline complete, Vertex-migrated, legal corpus at 104 clauses, antibody drafter on Claude Sonnet.
-Active work: whitepaper publish → grant scanner scheduling → dashboard → outreach.
+Core pipeline complete. Whitepaper published (v2.1, 2026-06-04). GCP fully torn down (2026-06-06) — clean slate, local-primary architecture. Vertex Discovery Engine gone with govtech-control. Legal corpus source JSONs confirmed on disk (104 clauses, 8 files). Outreach gate cleared.
+**Active work: grant scanner cron → outreach.**
 Scott Nelson engagement permanently closed — building on merit, own timeline.
 
 ---
@@ -46,8 +46,8 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 
 | # | Question | Blocks? |
 |---|---|---|
-| 1 | LLC filing — deferred to post-revenue. Sole prop until first paying client. | Blocks domain/email but not pipeline or outreach |
-| 2 | Whitepaper publish — 3 placeholder URLs are the only blocker. Fill GitHub repo URLs then publish. | Blocks prime contractor outreach |
+| 1 | LLC filing — deferred to post-revenue. Sole prop until first paying client. | Does not block pipeline or outreach |
+| 2 | ~~Whitepaper publish~~ | ✅ CLOSED — v2.1 live at apex-ronin/Rise-Of-The-Prompt-Kiddie (2026-06-04) |
 
 ---
 
@@ -63,11 +63,11 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 
 ## EXECUTION ORDER — NEXT SESSION
 
-1. **Whitepaper publish** — fill 3 placeholder GitHub URLs in `Rise_Of_The_Prompt_Kiddie.md`, push to jsnnlsn-prog/primordial-galaxy, publish
-2. **Grant scanner scheduling** — `execution/grant_hunter.py` exists and works, not yet on a cron. Wire to Cloud Scheduler (3× daily or daily at minimum).
-3. **Bug runs** — run full pipeline end-to-end, verify antibody agent on Claude Sonnet, verify corpus retrieval, check output quality
-4. **Dashboard** — rebuild on GCP with auth when bug runs pass clean
-5. **Prime contractor outreach** — once whitepaper is live and pipeline is clean
+1. **Grant scanner cron** — `execution/grant_hunter.py` exists and works, not scheduled. Wire to local Windows Task Scheduler or a simple scheduled script (Cloud Scheduler suspended — GCP torn down, local-primary until cloud trigger fires). Daily minimum.
+2. **Fix bugs 1–4** — grants.gov API key (register at grantsolutions.gov) · sbir.gov URL update · CalOSBA URL verify · Google Discovery dead (govtech-control deleted — skip or stub until cloud rebuilt)
+3. **Bug run** — full pipeline end-to-end post-fixes. Verify antibody agent on Claude Sonnet, corpus retrieval quality, output shape.
+4. **Outreach** — two M-26-04 email drafts ready. Send after bug run confirms pipeline is clean.
+5. **Dashboard** — rebuild after first paying client or when cloud trigger fires (FedRAMP customer / volume / collaborator).
 
 ---
 
@@ -75,19 +75,20 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 
 | Component | Status | Notes |
 |---|---|---|
-| Hetzner CPX32 | DEAD | Shutdown verified 2026-04-06. No response. |
-| GCP (govtech-control) | LIVE ✅ | Billing active, verified 2026-05-29 |
+| Hetzner CPX32 | DEAD | Shutdown verified 2026-04-06. |
+| GCP — all 5 projects | DELETED ✅ | Torn down 2026-06-06. Clean slate. org jsn-nlsn-org retained. |
 | Anthropic Pro subscription | LIVE ✅ | Restored 2026-06-02 |
-| Gemini pipeline | VERTEX MIGRATED ✅ | All 3 files confirmed — zero google.generativeai imports |
-| Legal corpus | LIVE — 104 clauses ✅ | Ingested to Vertex, datastore clean |
-| Antibody drafter | CLAUDE SONNET ✅ | claude-sonnet-4-6 via Vertex (spec gap closed 2026-05-14) |
-| Grant Hunter | COMPLETE ✅ | 4-source pipeline — NOT YET SCHEDULED on cron |
+| Inference layer | LOCAL — Claude via API | Vertex endpoints gone. Claude Sonnet via Anthropic API directly. |
+| Legal corpus | ON DISK ✅ | 104 clauses, 8 source JSONs at `data/legal_corpus/`. Vertex datastore gone — source files are ground truth. |
+| Antibody drafter | CLAUDE SONNET ✅ | claude-sonnet-4-6 via Anthropic API (Vertex endpoint deleted with project) |
+| Vertex Discovery Engine | DEAD | Deleted with govtech-control. Bug 1 (Google Discovery 0 results) is now permanent until cloud rebuilt. |
+| Grant Hunter | COMPLETE ✅ — NOT SCHEDULED | Pipeline works. Needs local cron. |
 | M-26-04 compliance | STAMP FUNCTION ✅ | `compliance/disclosure_template.py:stamp_disclosure()` |
 | SAM.gov API key | LIVE ✅ | Verified 2026-04-14 |
-| Whitepaper | 99% DONE — BLOCKED | 3 placeholder URLs only. `Rise_Of_The_Prompt_Kiddie.md` |
-| Dashboard | NOT REBUILT | Rebuild on GCP with auth after pipeline bug runs pass |
-| LLC (Apex Ronin LLC Arizona) | DEFERRED | Post-revenue. Sole prop for now. |
-| apexronin.com domain | NOT REGISTERED | Deferred with LLC |
+| Whitepaper | PUBLISHED ✅ | v2.1 live — apex-ronin/Rise-Of-The-Prompt-Kiddie (2026-06-04) |
+| Dashboard | SUSPENDED | Rebuild when cloud trigger fires or first paying client. |
+| Brand | SETTLED ✅ | Sole operator. apexronin.com owned. apex-ronin GitHub org live. |
+| LLC | DEFERRED | Post-revenue. Sole prop for now. |
 | Scott Nelson | PERMANENTLY CLOSED | Own merit, own timeline. Do not contact. |
 
 ---

@@ -133,3 +133,8 @@ class Orchestrator:
             elif res:
                 all_items.append(res)
         return all_items
+
+    def shutdown(self):
+        """Shut down the thread pool cleanly. Call after all modules have run."""
+        self.executor.shutdown(wait=True)
+        logger.info("Orchestrator executor shut down cleanly.")

@@ -1,49 +1,45 @@
+"""
+RFP Analyst — dual-track analysis (strategic fit + red team + antibody).
+
+Formerly used Vertex AI / Gemini Flash. Swapped to Anthropic API (claude-sonnet-4-6)
+after GCP teardown 2026-06-06. Local-primary architecture.
+
+Primary source — M-26-04: https://www.whitehouse.gov/wp-content/uploads/2025/12/M-26-04-Increasing-Public-Trust-in-Artificial-Intelligence-Through-Unbiased-AI-Principles-1.pdf
+"""
+
 import json
 import os
-import time
 from dotenv import load_dotenv
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
+from llm_client import complete as llm_complete
 from shared_utils import antibody_prompt_sanitizer_v1
 
-# Load environment variables
 load_dotenv()
 
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "govtech-control")
-LOCATION = os.getenv("VERTEX_LOCATION", "us-central1") # Default location
+# Budget cap — reject documents that would cause excessive token spend
+MAX_SESSION_CHARS = 100_000
+MAX_PROMPT_CHARS = 30_000
 
-# Initialize Vertex AI
-vertexai.init(project=PROJECT_ID, location=LOCATION)
 
-def analyze_rfp(rfp_text, max_chars=30000):
+def analyze_rfp(rfp_text: str, max_chars: int = MAX_PROMPT_CHARS) -> dict | None:
     """
-    Analyze RFP text using Gemini API.
-    
-    Args:
-        rfp_text: The full text of the RFP document
-        max_chars: Maximum characters to send
-    
-    Returns:
-        dict: Analysis results or None if failed
+    Analyze RFP text using Claude API.
+
+    Returns a dict with strategic fit, red team findings, and an immune system antibody clause.
+    Returns None on any failure — caller falls back to keyword scoring.
     """
-    # Vertex AI uses ADC, project ID, and location instead of API keys for enterprise auth
-    if not PROJECT_ID:
-        print("    [!] GOOGLE_CLOUD_PROJECT not found in .env file")
-        return None
-        
     if not rfp_text:
         return None
 
-    # Budget Guard - Finding AS-03 (B-4 fix: guard must run on original input, before truncation)
-    # Rejects absurdly large documents that would cause excessive API cost.
-    MAX_SESSION_CHARS = 100000
+    # Budget Guard (B-4 fix: guard runs on original input before truncation)
     if len(rfp_text) > MAX_SESSION_CHARS:
-        print(f"    [!!!] COST CAP TRIGGERED: RFP too large ({len(rfp_text)} chars). Rejecting to prevent budget bleed.")
+        print(f"    [!!!] COST CAP TRIGGERED: {len(rfp_text)} chars > {MAX_SESSION_CHARS}. Rejecting.")
         return {"status": "rejected", "reason": "cost_cap_exceeded"}
 
-    # Truncate if too long for prompt context
     if len(rfp_text) > max_chars:
         rfp_text = rfp_text[:max_chars] + "\n... [TRUNCATED]"
+
+    # Sanitize input — Finding PA-02
+    rfp_text = antibody_prompt_sanitizer_v1(rfp_text)
 
     prompt = f"""You are a senior AI Fraud Security Researcher performing a dual-track analysis on a government RFP document.
 
@@ -58,10 +54,12 @@ Identify specific vectors where an AI-enabled fraudster (a "Prompt Kiddie") coul
 2. **Template Farming**: Can AI generate the deliverables with zero human overhead?
 3. **Identity Fraud**: Is there a lack of rigorous human-in-the-loop verification?
 
-**DEI COMPLIANCE (Non-negotiable)**: Focus ONLY on qualifications, experience, and efficiency. Do NOT use or recommend race, ethnicity, or any identity-based metrics in vendor selection or scoring. Identity-based scoring is a compliance failure under the 2026 DEI Executive Order.
+**DEI COMPLIANCE (Non-negotiable)**: Focus ONLY on qualifications, experience, and efficiency. Do NOT use or recommend race, ethnicity, or any identity-based metrics. Identity-based scoring is a compliance failure under the 2026 DEI Executive Order.
 
 ### Part 3: Antibody Generation (Immune System)
-Generate a specific, legally-binding RFP clause (the "Antibody") that would prevent the identified fraud vectors by making them too expensive to facilitate. Use 'The Actual Legally-Sounding Text' only. Focus on performance verification.
+Generate a specific, legally-binding RFP clause that prevents the identified fraud vectors by making them too expensive to execute. Use legally precise language. Focus on performance verification.
+
+Return ONLY valid JSON — no markdown, no backticks, no explanation:
 {{
   "project_type": "Consulting" | "Construction" | "Mixed",
   "remote_friendly": true | false,
@@ -84,55 +82,42 @@ Generate a specific, legally-binding RFP clause (the "Antibody") that would prev
 RFP Text:
 {rfp_text}
 """
-    
-    # Sanitize input - Finding PA-02
-    rfp_text = antibody_prompt_sanitizer_v1(rfp_text)
-    
+
     try:
-        model = GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content(
+        raw = llm_complete(
             prompt,
-            generation_config=GenerationConfig(
-                max_output_tokens=8192,
-                response_mime_type="application/json"
-            )
+            system="You are a JSON-only API. Output strictly valid JSON. No markdown, no code blocks, no backticks.",
+            mode="fast",
         )
-        return json.loads(response.text)
+        if not raw:
+            print("    [!] All LLM providers failed — falling back to keyword scoring")
+            return None
+        # Strip accidental markdown fences
+        if "```" in raw:
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.split("```")[0]
+        return json.loads(raw.strip())
+    except json.JSONDecodeError as e:
+        print(f"    [!] JSON parse error in RFP analysis: {e}")
+        return None
     except Exception as e:
-        import traceback
-        print(f"    [!] Vertex AI Analysis Error: {e}")
-        try:
-            print(f"    [!] Raw Response: {response.text}")
-        except Exception:
-            pass
+        print(f"    [!] RFP analysis error: {e}")
         return None
 
+
 if __name__ == "__main__":
-    # Test with a sample RFP snippet
-    sample_text = """
+    sample = """
     LAKE COUNTY SPECIAL DISTRICTS
-    REQUEST FOR PROPOSAL
-    ON-CALL CIVIL ENGINEERING SERVICES
-    
-    The Lake County Special Districts is seeking qualified civil engineering firms to provide
-    on-call engineering services for various projects including water system improvements,
-    wastewater treatment, and road maintenance.
-    
-    Contract Duration: 3 years
-    Estimated Annual Value: $100,000 - $250,000
-    
-    Small Business Preference: The District encourages small businesses to apply and will
-    give preference to qualified local firms.
-    
-    Work Location: Services may be performed remotely with occasional site visits required
-    for field inspections and stakeholder meetings.
+    REQUEST FOR PROPOSAL — ON-CALL CIVIL ENGINEERING SERVICES
+
+    Seeking qualified civil engineering firms for water system improvements,
+    wastewater treatment, and road maintenance. 3-year contract. Est. $100K-$250K/yr.
+    Small business preference. Remote work with occasional site visits.
     """
-    
-    analysis = analyze_rfp(sample_text)
-    
-    if analysis:
-        print("\n" + "="*60)
-        print("ANALYSIS RESULTS:")
-        print(json.dumps(analysis, indent=2))
+    result = analyze_rfp(sample)
+    if result:
+        print(json.dumps(result, indent=2))
     else:
-        print("\nAnalysis failed.")
+        print("Analysis failed — check ANTHROPIC_API_KEY in .env")

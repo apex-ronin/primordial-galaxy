@@ -1,6 +1,10 @@
 import json
 import os
+import shutil
+import sys
+import tempfile
 from datetime import datetime
+from dotenv import load_dotenv
 from hunter_eyes import fetch_opportunities
 from hunter_brain import analyze_opportunity
 from discovery_engine import search_vertex
@@ -32,6 +36,8 @@ def normalize_google_result(results):
     return normalized
 
 def main():
+    load_dotenv()
+
     print("="*60)
     print("GovTech Hunter v0.6 - CSDA Honey Pot Active")
     print("="*60)
@@ -39,9 +45,9 @@ def main():
     # 0. Pre-flight Health Check
     print("\n[0] Running Pre-flight Health Checks...")
     if not run_all_checks():
-        print("\n[!] Health checks reported issues. Engaging self-healing protocols...")
-        # In a real scenario, we might attempt auto-fixes here. 
-    
+        print("\n[!!!] Critical health check failed — aborting. Fix the issue above and re-run.")
+        sys.exit(1)
+
     orchestrator = Orchestrator()
     
     # 1. Execution Phase (Parallel-ish execution via Orchestrator)
@@ -121,10 +127,19 @@ def main():
     # 3. Save & Report
     print(f"\n--- PHASE 3: REPORTING ---")
     print(f"[*] Saving intelligence to {OUTPUT_FILE}...")
-    
-    with open(OUTPUT_FILE, 'w') as f:
-        json.dump(scored_opportunities, f, indent=2)
-        
+
+    # Atomic write — write to temp file then rename so a crash mid-write
+    # never leaves a corrupt opportunities.json.
+    # dir=output_dir keeps temp on same volume so shutil.move is an atomic rename.
+    # flush+fsync before move ensures OS page cache is committed to disk first.
+    output_dir = os.path.dirname(os.path.abspath(OUTPUT_FILE)) or "."
+    with tempfile.NamedTemporaryFile("w", dir=output_dir, suffix=".tmp", delete=False) as tmp:
+        json.dump(scored_opportunities, tmp, indent=2)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_path = tmp.name
+    shutil.move(tmp_path, OUTPUT_FILE)
+
     print(f"[*] Done. Saved {len(scored_opportunities)} opportunities.")
     
     # Summary of High Value
@@ -145,6 +160,8 @@ def main():
         contact = h.get('contact')
         if contact:
             print(f"    [+] POINT OF CONTACT: {contact}")
+
+    orchestrator.shutdown()
 
 if __name__ == "__main__":
     main()

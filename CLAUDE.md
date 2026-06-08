@@ -6,10 +6,12 @@ Government contract intelligence + red team simulation system.
 Scrapes public procurement sources → analyzes via Vertex AI → generates red team threats + antibody clauses.
 Domain specialization layer of R.O.N.I.N. / JARVIS.
 
-## Core Operating Principles (NEW)
+## Core Operating Principles
 1. **Commander's Intent + Semantic Hard-Stops:** Never rely solely on `pytest` passing as proof of correctness. Understand the "why" of every task. Every task has Semantic Hard-Stops — if you hit one, STOP and ask the user.
 2. **Trust but Verify:** No substantive commit ships without peer review. Do not blindly push without approval or spot check.
-3. **Primary Source Inline:** Any regulatory citation (OMB, FAR, DFARS, etc.) MUST carry the primary source URL in a code comment.
+3. **Primary Source Inline:** Any regulatory citation (OMB, FAR, DFARS, etc.) MUST carry the primary source URL in a code comment on the same logical block. If you can't paste the URL, you can't cite the regulation.
+4. **Tests Validate Behavior, Not Strings:** If a test asserts on a regulatory authority string (e.g. `assert authority == "EO 14179"`), the test is wrong and must be rewritten. Tests should validate observable behavior — log fields present, wrong-region calls rejected, correct artifact links. Pytest passing is necessary but not sufficient for "done."
+5. **Surface, Don't Assume:** If something feels like a substantive choice rather than a mechanical step, STOP and ask. Interrupted is recoverable. Silent wrong assumption is not.
 
 ## Session Protocol — FOLLOW EVERY SESSION
 
@@ -30,13 +32,12 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 
 ## Infrastructure
 
-- **Server:** Hetzner CPX32 — `[REDACTED]` — SHUTDOWN PENDING
-- **SSH:** `ssh -i ~/.ssh/hetzner_primordial root@[REDACTED]`
-- **Dashboard:** TAKEN DOWN — rebuild on GCP with auth when enterprise-ready
-- **GCP Project:** `govtech-control`
-- **Service account:** `[REDACTED]`
-- **Vertex datastore:** `govtechdata_1772540768925` (global region)
-- **Key:** `/root/gcp-key.json` (server-side only — never commit)
+- **Server:** Hetzner CPX32 — DEAD. Shutdown verified 2026-04-06.
+- **GCP:** ALL PROJECTS DELETED 2026-06-06. Clean slate. org `jsn-nlsn-org` retained.
+- **Dashboard:** SUSPENDED — rebuild when cloud trigger fires (FedRAMP customer / volume / collaborator).
+- **Inference:** Claude Sonnet via Anthropic API directly (no Vertex endpoint).
+- **Legal corpus:** Source JSONs on disk at `data/legal_corpus/` — 104 clauses, 8 files. Ground truth.
+- **Vertex datastore:** DELETED with govtech-control. Google Discovery source is dead (Bug 1 permanent until cloud rebuilt).
 
 ## Key Modules
 
@@ -59,7 +60,7 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 
 - File: `execution/antibody_agent.py` — exists and functional
 - Pipeline: classifier → corpus retrieval → Vertex AI drafting → specificity gate (≥75) → economic calibration
-- **Known spec gap:** drafter uses Gemini Flash, spec calls for Claude Sonnet
+- **Drafter:** Claude Sonnet via Anthropic API (spec gap closed 2026-05-14, Vertex endpoint deleted 2026-06-06 — use API directly)
 - **Known spec gap:** retrieval uses keyword-equality, not semantic search
 - Interface: `antibody_agent.generate(opportunity, threat_assessment)`
 - DO NOT inline into `red_team_simulation.py`
@@ -79,8 +80,8 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 - `grant_hunter.py` [REDACTED] contact is intentional internal intel
 - pureswarm-node is retired — Hetzner is the active node (shutdown pending)
 - 13 vs 22 opportunities = not a bug, main.py overwrites each run
-- Vertex AI only — no direct `google.generativeai` calls anywhere
-- Dashboard is DOWN — no auth = not enterprise, rebuild on GCP
+- No direct `google.generativeai` calls anywhere — Anthropic API for drafting, local corpus for retrieval
+- Dashboard SUSPENDED — rebuild when cloud trigger fires
 - AaaS API cut until 5 paying clients
 - CSDA membership = hard no, building own 90K entity database
 
@@ -94,7 +95,7 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 ## Source of Truth Files
 
 - **This session:** `primordial_galaxy_roadmap.md` (project root)
-- **Cross-project:** `C:\Users\jnel9\OneDrive\Workspaces\APEX_RONIN_FUNCTIONAL_ROADMAP.md` (path updated 2026-06-02 — use STATE.md as ground truth)
+- **Cross-project:** `C:\Users\jnel9\OneDrive\Workspaces\APEX_RONIN_FUNCTIONAL_ROADMAP.md` — synced to STATE.md 2026-06-06
 - **directives/ files:** ARCHIVED — historical reference only
 
 ## Model Preferences
