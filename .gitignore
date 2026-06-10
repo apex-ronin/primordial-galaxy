@@ -34,3 +34,7 @@ Portfolio/
 Private/
 peer_review_package/
 !data/legal_corpus/
+
+# local toolchain dirs
+.venv/
+.vs/

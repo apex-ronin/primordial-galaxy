@@ -31,6 +31,10 @@ LOCAL_BASE_URL     = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:1234/v1")
 VENICE_BASE_URL    = "https://api.venice.ai/api/v1"
 LLM_MODE           = os.getenv("LLM_MODE", "auto").lower()
 
+# Last provider that successfully served a completion, e.g. "local (qwen3-8b)".
+# Read via get_last_provider() so callers can report the actual serving tier.
+LAST_PROVIDER = None
+
 # Model assignments
 # "fast"    — bulk analysis (gemini_analyst.py): cheap + quick
 # "precise" — legal drafting (antibody_agent.py): higher quality floor
@@ -66,6 +70,8 @@ def _try_local(prompt: str, system: str | None, mode: str) -> str | None:
             max_tokens=4096,
         )
         text = response.choices[0].message.content.strip()
+        global LAST_PROVIDER
+        LAST_PROVIDER = f"local ({model})"
         print(f"    [LLM] local ({model})")
         return text
     except Exception as e:
@@ -90,6 +96,8 @@ def _try_venice(prompt: str, system: str | None, mode: str) -> str | None:
             max_tokens=4096,
         )
         text = response.choices[0].message.content.strip()
+        global LAST_PROVIDER
+        LAST_PROVIDER = f"venice ({model})"
         print(f"    [LLM] venice ({model})")
         return text
     except Exception as e:
@@ -109,11 +117,18 @@ def _try_anthropic(prompt: str, system: str | None) -> str | None:
             kwargs["system"] = system
         response = client.messages.create(**kwargs)
         text = response.content[0].text.strip()
+        global LAST_PROVIDER
+        LAST_PROVIDER = f"anthropic ({ANTHROPIC_MODEL})"
         print(f"    [LLM] anthropic ({ANTHROPIC_MODEL})")
         return text
     except Exception as e:
         print(f"    [LLM] anthropic failed: {e}")
         return None
+
+
+def get_last_provider() -> str | None:
+    """Tier that served the most recent successful complete(), e.g. 'local (qwen3-8b)'."""
+    return LAST_PROVIDER
 
 
 def complete(prompt: str, system: str | None = None, mode: str = "fast") -> str | None:

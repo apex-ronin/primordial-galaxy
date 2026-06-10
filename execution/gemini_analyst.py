@@ -10,7 +10,7 @@ Primary source — M-26-04: https://www.whitehouse.gov/wp-content/uploads/2025/1
 import json
 import os
 from dotenv import load_dotenv
-from llm_client import complete as llm_complete
+from llm_client import complete as llm_complete, get_last_provider
 from shared_utils import antibody_prompt_sanitizer_v1
 
 load_dotenv()
@@ -98,7 +98,10 @@ RFP Text:
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.split("```")[0]
-        return json.loads(raw.strip())
+        result = json.loads(raw.strip())
+        if isinstance(result, dict):
+            result["_llm_provider"] = get_last_provider() or "unknown"
+        return result
     except json.JSONDecodeError as e:
         print(f"    [!] JSON parse error in RFP analysis: {e}")
         return None

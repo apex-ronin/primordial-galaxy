@@ -118,3 +118,4 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 | v11 | 2026-04-03-04 | Full audit, git cleanup, OMB doc recovered, roadmap system established | 7741d6b |
 | handoff sprint | 2026-05-14 | Corpus 33→104, drafter→Claude Sonnet, corpus ingested, item6 complete, handoff package | 1d7816b |
 | v12 | 2026-06-03 | TTSI_SPEC_v2 reviewed + killed; disclosure_template.py built; full roadmap audit + sync | — |
+| v13 | 2026-06-10 | Handoff Items 3.1–3.4: AI-gate fix (>100-char silent keyword fallback root-caused — not an LLM outage), honest analysis_method tier label, diag scripts deleted, doc_fetcher.py document pull (login-wall aware). | — |

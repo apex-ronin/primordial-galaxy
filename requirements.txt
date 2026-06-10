@@ -8,3 +8,4 @@ google-cloud-aiplatform==1.71.0
 google-cloud-discoveryengine==0.13.1
 anthropic>=0.105.0
 openai>=1.0.0       # Venice API + LM Studio local (both OpenAI-compatible endpoints)
+beautifulsoup4>=4.12.0  # doc_fetcher — RFP document pull from posting pages

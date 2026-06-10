@@ -1,5 +1,5 @@
 import json
-from pdf_reader import get_pdf_text
+from doc_fetcher import get_document_text
 from gemini_analyst import analyze_rfp
 
 def analyze_opportunity(opportunity):
@@ -9,27 +9,34 @@ def analyze_opportunity(opportunity):
     title = opportunity['title'].lower()
     link = opportunity['link']
     
-    # 1. Get Content (Title + PDF Text if available)
-    # Bug 6 fix: seed full_text with title + snippet so non-PDF sources exceed the
-    # 100-char threshold and get AI analysis instead of falling back to keywords.
+    # 1. Get Content — title + snippet seed, upgraded with full document text.
+    # Item 3.4 (2026-06-09): non-PDF links (CSDA posting pages) now get the page
+    # text + linked RFP documents pulled, so red-team/antibody work from full
+    # text instead of title+snippet.
     snippet = opportunity.get('snippet', '')
     full_text = (title + " " + snippet).strip()
     pdf_status = "No PDF"
 
-    if link.lower().endswith('.pdf'):
-        print(f"    [Brain] Downloading PDF for analysis: {title[:30]}...")
-        text, error = get_pdf_text(link)
-        if text:
-            full_text = text  # Full PDF text always wins
-            pdf_status = "PDF Analyzed"
-        else:
-            pdf_status = f"PDF Error: {error}"
+    print(f"    [Brain] Fetching documents for: {title[:40]}...")
+    text, status = get_document_text(link)
+    pdf_status = status
+    if text:
+        full_text = f"{title}\n{snippet}\n\n{text}"
 
     # 2. Try AI Analysis (if we have content)
+    # 2026-06-09 fix: the old >100-char gate silently dropped short-title records
+    # (terse SAM.gov titles, snippet-less CSDA postings) to keyword scoring while
+    # labeling them "AI unavailable". Local tier is free — analyze anything with
+    # enough text to carry signal.
     ai_analysis = None
-    if len(full_text) > 100:  # Only worth sending to AI if we have real content
+    fallback_reason = "content too short"
+    if len(full_text) > 20:
         ai_analysis = analyze_rfp(full_text)
-    
+        fallback_reason = "AI unavailable"
+    if ai_analysis and ai_analysis.get("status") == "rejected":
+        ai_analysis = None
+        fallback_reason = "cost cap exceeded"
+
     # 3. Determine Score
     if ai_analysis:
         # Use AI score
@@ -50,7 +57,7 @@ def analyze_opportunity(opportunity):
         opportunity['red_team'] = ai_analysis.get('red_team_findings', {})
         opportunity['immune_system'] = ai_analysis.get('immune_system_antibody', {})
         
-        opportunity['analysis_method'] = "Gemini AI (Dual-Track)"
+        opportunity['analysis_method'] = f"LLM Dual-Track [{ai_analysis.pop('_llm_provider', 'unknown')}]"
     else:
         # Fallback to keyword analysis
         score = keyword_score(title)
@@ -59,7 +66,7 @@ def analyze_opportunity(opportunity):
         opportunity['win_probability'] = score
         opportunity['fit_label'] = fit_label
         opportunity['pdf_status'] = pdf_status
-        opportunity['analysis_notes'] = "Keyword-based analysis (AI unavailable)"
+        opportunity['analysis_notes'] = f"Keyword-based analysis ({fallback_reason})"
         opportunity['analysis_method'] = "Keywords"
     
     return opportunity
