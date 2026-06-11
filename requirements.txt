@@ -4,8 +4,10 @@ python-dotenv==1.0.1
 pypdf==5.1.0
 fastapi==0.115.8
 uvicorn==0.34.0
-google-cloud-aiplatform==1.71.0
-google-cloud-discoveryengine==0.13.1
+# google-cloud-aiplatform / google-cloud-discoveryengine removed 2026-06-10 —
+# Vertex AI Search + embeddings retired in GCP teardown; retrieval is local FAISS now.
 anthropic>=0.105.0
 openai>=1.0.0       # Venice API + LM Studio local (both OpenAI-compatible endpoints)
 beautifulsoup4>=4.12.0  # doc_fetcher — RFP document pull from posting pages
+faiss-cpu>=1.9.0        # antibody semantic retrieval — local nomic-embed legal_corpus index
+numpy>=1.25             # faiss query vectors

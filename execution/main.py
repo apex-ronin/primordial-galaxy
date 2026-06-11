@@ -3,11 +3,9 @@ import os
 import shutil
 import sys
 import tempfile
-from datetime import datetime
 from dotenv import load_dotenv
 from hunter_eyes import fetch_opportunities
 from hunter_brain import analyze_opportunity
-from discovery_engine import search_vertex
 from scraper_csda import fetch_csda_opportunities
 from scraper_sam import fetch_federal_opportunities
 from health_check import run_all_checks
@@ -15,25 +13,6 @@ from orchestrator import Orchestrator
 from grant_hunter import fetch_grant_opportunities, promote_grant_fit
 
 OUTPUT_FILE = "opportunities.json"
-
-def normalize_google_result(results):
-    """
-    Wrapper to normalize Google results inside the orchestrator flow if needed,
-    but Orchestrator returns the raw list. We can normalize post-fetch.
-    """
-    normalized = []
-    if not results: return []
-    
-    for res in results:
-        normalized.append({
-            "title": res.get('title', 'Unknown PDF'),
-            "link": res.get('link', '#'),
-            "deadline": "Unknown (PDF)",
-            "source": "Google Discovery",
-            "scraped_at": datetime.now().isoformat(),
-            "snippet": res.get('snippet', '')
-        })
-    return normalized
 
 def main():
     load_dotenv()
@@ -73,19 +52,9 @@ def main():
         fetch_federal_opportunities
     )
     results_sam = results_sam_raw.get('data', [])
-    
-    # Google requires arguments
-    query = '"special district" "RFP" site:.gov filetype:pdf'
-    results_google_raw_packet = orchestrator.run_module(
-        "Google Discovery",
-        search_vertex,
-        query,
-        num_results=5
-    )
-    results_google_raw = results_google_raw_packet.get('data', [])
-    
-    # Normalization for Google results
-    results_google = normalize_google_result(results_google_raw)
+
+    # Google Discovery (Vertex AI Search) retired 2026-06-10 — datastore deleted
+    # in the GCP teardown, no local equivalent. See execution/discovery_engine.py.
 
     # 1.5 Grant Hunter Market Prototype
     results_grants_raw = orchestrator.run_module(
@@ -96,10 +65,9 @@ def main():
 
     # Consolidate
     all_opportunities = orchestrator.consolidate_results([
-        results_csda, 
-        results_eldorado, 
-        results_sam, 
-        results_google,
+        results_csda,
+        results_eldorado,
+        results_sam,
         results_grants
     ])
     

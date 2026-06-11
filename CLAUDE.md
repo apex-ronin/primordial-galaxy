@@ -3,7 +3,7 @@
 ## What This Project Is
 
 Government contract intelligence + red team simulation system.
-Scrapes public procurement sources → analyzes via Vertex AI → generates red team threats + antibody clauses.
+Scrapes public procurement sources → analyzes via a local LLM cascade (LM Studio → Venice → Anthropic) → generates red team threats + antibody clauses grounded in a local FAISS legal corpus.
 Domain specialization layer of R.O.N.I.N. / JARVIS.
 
 ## Core Operating Principles
@@ -37,7 +37,8 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 - **Dashboard:** SUSPENDED — rebuild when cloud trigger fires (FedRAMP customer / volume / collaborator).
 - **Inference:** Claude Sonnet via Anthropic API directly (no Vertex endpoint).
 - **Legal corpus:** Source JSONs on disk at `data/legal_corpus/` — 104 clauses, 8 files. Ground truth.
-- **Vertex datastore:** DELETED with govtech-control. Google Discovery source is dead (Bug 1 permanent until cloud rebuilt).
+- **Vertex datastore:** DELETED with govtech-control. Google Discovery source retired 2026-06-10 — `discovery_engine.py` is a no-op stub and the google-cloud deps were dropped.
+- **Retrieval:** local nomic-embed FAISS indexes at `G:\AI-Models\indexes` (legal_corpus 104 clauses, principalities 78k). Embedder served by LM Studio.
 
 ## Key Modules
 
@@ -45,23 +46,24 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 |------|------|
 | `execution/main.py` | Entry point — runs full pipeline |
 | `execution/orchestrator.py` | Coordinates pipeline stages |
-| `execution/discovery_engine.py` | Vertex AI search queries |
+| `execution/discovery_engine.py` | RETIRED 2026-06-10 — Vertex AI Search no-op stub (datastore deleted) |
 | `execution/scraper_sam.py` | SAM.gov scraper (API key in .env — check status) |
 | `execution/scraper_eldorado.py` | Eldorado County scraper |
 | `execution/scraper_csda.py` | CSDA scraper (Playwright) |
-| `execution/gemini_analyst.py` | Opportunity scoring via Vertex AI |
-| `execution/red_team_simulation.py` | Threat generation + antibody clauses via Vertex AI |
-| `execution/antibody_agent.py` | Legal corpus retrieval + clause drafting + scoring |
-| `execution/grant_hunter.py` | Grant intelligence — 4 sources ([REDACTED] contact = intentional) |
+| `execution/gemini_analyst.py` | Opportunity scoring via local LLM cascade (name is legacy — no Gemini/Vertex) |
+| `execution/red_team_simulation.py` | Threat generation + antibody clauses via LLM cascade; appends to `data/procurement_shield.json` |
+| `execution/antibody_agent.py` | Semantic FAISS legal-corpus retrieval + clause drafting (cascade) + grounded specificity scoring |
+| `execution/grant_hunter.py` | Grant intelligence — seeds + REST APIs + browser (Vertex gap-filler retired 2026-06-10) |
 | `execution/shared_utils.py` | antibody_prompt_sanitizer_v1, calculate_roi_safe |
 | `execution/aaas_poc.py` | **Publication layer only** — not a pipeline step |
 
 ## Antibody Agent (Item 24 — BUILT)
 
 - File: `execution/antibody_agent.py` — exists and functional
-- Pipeline: classifier → corpus retrieval → Vertex AI drafting → specificity gate (≥75) → economic calibration
-- **Drafter:** Claude Sonnet via Anthropic API (spec gap closed 2026-05-14, Vertex endpoint deleted 2026-06-06 — use API directly)
-- **Known spec gap:** retrieval uses keyword-equality, not semantic search
+- Pipeline: semantic FAISS retrieval → clause drafting (LLM cascade) → grounded specificity gate → economic calibration
+- **Drafter:** local LLM cascade (LM Studio qwen3 → Venice → Anthropic) via `llm_client.complete(mode="precise")`
+- **Retrieval:** semantic search over local nomic-embed FAISS index (`G:\AI-Models\indexes\legal_corpus.faiss`, mirrors ronin `prism_tools`); lexical keyword match retained as offline fallback (semantic rewire 2026-06-10)
+- **Validation:** `VALIDATED` requires grounding (cited far_reference matches a retrieved clause id) AND a specificity rubric score ≥75 (cadence / quantity / actor / enforcement teeth) — not verbosity (2026-06-10)
 - Interface: `antibody_agent.generate(opportunity, threat_assessment)`
 - DO NOT inline into `red_team_simulation.py`
 
@@ -100,5 +102,7 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 
 ## Model Preferences
 
-- Vertex AI (Gemini Flash): classification, scoring, bulk analysis
-- Claude Sonnet via Vertex: legal-precision drafting (antibody clauses) — spec, not yet implemented
+Local-primary cascade (post-GCP teardown 2026-06-06 — no Vertex/Gemini anywhere):
+- **Triage / classification / scoring:** local `qwen3-8b` via LM Studio (`llm_client.complete(mode="fast")`)
+- **Legal-precision drafting (antibody clauses):** cascade `mode="precise"` — local → Venice (llama-3.3-70b) → Anthropic API
+- **Retrieval embeddings:** `nomic-embed-text-v1.5` (768d) via LM Studio, indexed in local FAISS (`G:\AI-Models\indexes`)

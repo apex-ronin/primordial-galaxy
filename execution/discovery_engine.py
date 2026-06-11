@@ -1,76 +1,22 @@
-import os
-import json
-from google.cloud import discoveryengine_v1beta as discoveryengine
-from dotenv import load_dotenv
+"""
+Discovery Engine — RETIRED 2026-06-10.
 
-# Load environment variables
-load_dotenv()
+Vertex AI Search (Discovery Engine) was the cloud opportunity-discovery source.
+Its datastore lived in GCP project `govtech-control`, which was deleted in the
+2026-06-06 teardown. There is no local equivalent (it indexed live web/PDF
+opportunities, not the legal corpus or principalities), so this source is
+retired rather than rewired.
 
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
-LOCATION = os.getenv("VERTEX_LOCATION", "global")
-DATA_STORE_ID = os.getenv("VERTEX_DATA_STORE_ID")
+`search_vertex` is kept as a no-op stub so any lingering import stays valid and
+returns an empty result set. The google-cloud-discoveryengine dependency has
+been dropped from requirements.txt. If cloud discovery is ever rebuilt (FedRAMP
+customer / volume trigger), restore from git history at the pre-retirement commit.
+"""
+
 
 def search_vertex(query, num_results=10):
+    """Retired cloud discovery source. Always returns an empty list.
+
+    Kept for import-compatibility only — see module docstring.
     """
-    Uses Vertex AI Search (Discovery Engine) to find GovTech targets.
-    """
-    if not PROJECT_ID or not DATA_STORE_ID:
-        print("[!] Error: Missing Project ID or Vertex Data Store ID.")
-        return []
-
-    print(f"[*] Searching Vertex AI Search for: '{query}'...")
-    
-    # Initialize client
-    client_options = (
-        {"api_endpoint": f"{LOCATION}-discoveryengine.googleapis.com"}
-        if LOCATION != "global"
-        else None
-    )
-    client = discoveryengine.SearchServiceClient(client_options=client_options)
-
-    # The full resource name of the search engine serving config
-    serving_config = client.serving_config_path(
-        project=PROJECT_ID,
-        location=LOCATION,
-        data_store=DATA_STORE_ID,
-        serving_config="default_config",
-    )
-
-    request = discoveryengine.SearchRequest(
-        serving_config=serving_config,
-        query=query,
-        page_size=num_results,
-    )
-
-    try:
-        response = client.search(request)
-        results = []
-        
-        # Iterate over results
-        for result in response.results:
-            document = result.document
-            derived_struct_data = document.derived_struct_data
-            
-            # Extract title and link from derived data
-            title = derived_struct_data.get("title", "N/A")
-            link = derived_struct_data.get("link", "N/A")
-            snippet = derived_struct_data.get("snippets", [{}])[0].get("snippet", "N/A") if derived_struct_data.get("snippets") else "N/A"
-            
-            res = {
-                "title": title,
-                "link": link,
-                "snippet": snippet
-            }
-            results.append(res)
-            print(f"    [+] Found: {title[:50]}...")
-
-        return results
-    except Exception as e:
-        print(f"[!] Vertex Search Error: {e}")
-        return []
-
-if __name__ == "__main__":
-    # Test Search
-    test_query = '"special district" "RFP" site:.gov filetype:pdf'
-    results = search_vertex(test_query, num_results=5)
-    print(json.dumps(results, indent=2))
+    return []

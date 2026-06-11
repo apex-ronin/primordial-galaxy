@@ -5,7 +5,7 @@ Discovery pipeline (in order):
   1. Hardcoded seeds       — verified high-value grants with direct contacts
   2. Federal REST APIs     — grants.gov + sbir.gov (scraper_grants_api)
   3. Browser portals       — California state programs (scraper_grants_browser)
-  4. Vertex AI semantic    — supplemental discovery for gaps
+  (Vertex AI semantic gap-filler retired 2026-06-10 — datastore deleted in GCP teardown)
 
 Scoring: 0-100 across four dimensions:
   - Relevance  (40 pts) — keyword match against Apex Ronin focus areas
@@ -18,7 +18,6 @@ LIVE CONTACT INTELLIGENCE (Finding AS-04 — intentional internal intel, do not 
 
 import json
 import os
-from discovery_engine import search_vertex
 from scraper_grants_api import fetch_all_api_grants
 from scraper_grants_browser import fetch_browser_grants
 
@@ -152,29 +151,8 @@ def fetch_grant_opportunities() -> list:
             seen.add(key)
             grants.append(grant)
 
-    # 4. Vertex AI semantic search — supplemental gap-filler
-    print("[*] Grant Vertex: Supplemental semantic search...")
-    try:
-        vertex_results = search_vertex(
-            '"SBIR" "STTR" "grant" "AI" "cybersecurity" site:grants.gov',
-            num_results=10,
-        )
-        for res in vertex_results:
-            key = res["title"].lower()[:60]
-            if key not in seen:
-                seen.add(key)
-                grants.append({
-                    "title": res["title"],
-                    "source": "Vertex AI",
-                    "link": res["link"],
-                    "snippet": res["snippet"],
-                    "value": 0,
-                    "agency": "Unknown",
-                    "deadline": "TBD",
-                    "grant_id": "",
-                })
-    except Exception as e:
-        print(f"[!] Vertex supplemental search failed: {e}")
+    # 4. Vertex AI semantic gap-filler — retired 2026-06-10 (datastore deleted in
+    #    GCP teardown, no local equivalent). Seeds + REST APIs + browser portals remain.
 
     print(f"[+] Grant Hunter: {len(grants)} total before scoring.")
 

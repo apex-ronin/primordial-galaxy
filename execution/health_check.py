@@ -8,7 +8,9 @@ Critical checks abort the run. Non-critical checks warn and continue.
 """
 
 import glob
+import json
 import os
+from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
@@ -16,6 +18,12 @@ load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORPUS_DIR = os.path.join(BASE_DIR, "data", "legal_corpus")
+
+# Local nomic-embed FAISS retrieval (mirrors antibody_agent / prism_tools config).
+INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", r"G:\AI-Models\indexes"))
+EMBED_URL = os.environ.get(
+    "LOCAL_LLM_BASE_URL", "http://localhost:1234/v1"
+).rstrip("/") + "/embeddings"
 
 
 def check_anthropic_api():
@@ -73,6 +81,35 @@ def check_local_corpus():
     return True, f"{len(files)} corpus files present"
 
 
+def check_local_embedder():
+    """Advisory — antibody semantic retrieval needs the local nomic-embed endpoint.
+
+    If LM Studio is down, the antibody agent silently falls back to keyword
+    matching (degraded). This surfaces that as a visible WARN in the run log so a
+    cold/failed embedder doesn't quietly cripple retrieval on an unattended run.
+    """
+    print("[*] Checking local embedder (nomic via LM Studio)...")
+    manifest_path = INDEX_DIR / "index_manifest.json"
+    if not manifest_path.exists():
+        return False, f"Index manifest not found at {manifest_path} — retrieval will use keyword fallback"
+    try:
+        embedder = json.loads(manifest_path.read_text(encoding="utf-8"))["legal_corpus"]["embedder"]
+    except Exception as e:
+        return False, f"Could not read embedder from manifest: {e}"
+    try:
+        resp = requests.post(
+            EMBED_URL,
+            json={"model": embedder, "input": ["search_query: health check"]},
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return False, f"Status {resp.status_code} — antibody falls back to keyword retrieval"
+        dims = len(resp.json()["data"][0]["embedding"])
+        return True, f"OK ({embedder}, {dims}-dim)"
+    except Exception as e:
+        return False, f"Unreachable at {EMBED_URL} ({e}) — antibody falls back to keyword retrieval"
+
+
 # Checks marked True are CRITICAL — pipeline exits if they fail.
 # Checks marked False are advisory — pipeline continues with degraded output.
 CHECKS = [
@@ -80,6 +117,7 @@ CHECKS = [
     ("SAM.gov",            check_sam_api,             False),  # advisory — other sources still run
     ("CSDA (Honey Pot)",   check_csda_clearinghouse,  False),  # advisory
     ("Local Corpus",       check_local_corpus,        True),   # critical — antibody agent needs this
+    ("Local Embedder",     check_local_embedder,      False),  # advisory — degrades to keyword retrieval
 ]
 
 
