@@ -151,9 +151,10 @@ def _is_grounded(far_reference: str, corpus_ids: List[str]) -> bool:
 
     Guards against hallucinated citations: 'VALIDATED' should mean the clause is
     anchored in the corpus context the model was given, not merely long enough.
-    Whitespace/case-insensitive and substring-tolerant (e.g. 'DFARS 252.204-7021'
-    matches a retrieved id of '252.204-7021'). Note: the DFARS 252.204-7020/7021
-    series was renumbered in Feb 2026 — use current numbering for live citations.
+    Whitespace/case-insensitive and substring-tolerant (e.g. a cited 'DFARS 252.xxx-xxxx'
+    matches a retrieved id of '252.xxx-xxxx'). This is a string-matching illustration, not
+    a regulatory citation — verify current clause numbers (e.g. the DFARS 252.204-7020/7021
+    series was renumbered Feb 2026) against the primary source before use in output.
     """
     if not far_reference:
         return False

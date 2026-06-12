@@ -39,7 +39,7 @@ def main():
     )
     results_csda = results_csda_raw.get('data', [])
     
-    # 🏮 DEPRECATED: El Dorado (Sniper) - superseded by CSDA (Vertex/Discovery Engine retired 2026-06-06)
+    # 🏮 DEPRECATED: El Dorado (Sniper) - single-district scraper superseded by the CSDA source
     # results_eldorado_raw = orchestrator.run_module(
     #     "El Dorado (Sniper)", 
     #     fetch_eldorado_opportunities
