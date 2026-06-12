@@ -154,7 +154,8 @@ def _is_grounded(far_reference: str, corpus_ids: List[str]) -> bool:
     Whitespace/case-insensitive and substring-tolerant (e.g. a cited 'DFARS 252.xxx-xxxx'
     matches a retrieved id of '252.xxx-xxxx'). This is a string-matching illustration, not
     a regulatory citation — verify current clause numbers (e.g. the DFARS 252.204-7020/7021
-    series was renumbered Feb 2026) against the primary source before use in output.
+    series was renumbered Feb 2026; primary source: https://www.acquisition.gov/dfars) against
+    the primary source before use in output.
     """
     if not far_reference:
         return False
