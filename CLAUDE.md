@@ -79,8 +79,8 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 ## Settled Decisions (do not re-litigate)
 
 - `aaas_poc.py` is a publication/API layer only, not a pipeline step
-- `grant_hunter.py` [REDACTED] contact is intentional internal intel
-- pureswarm-node is retired — Hetzner is the active node (shutdown pending)
+- `grant_hunter.py` program-officer contact is stripped from code (loads from gitignored `.env` via `NSF_AI_DIRECTOR_CONTACT`) — never re-hardcode real contacts
+- pureswarm-node retired; Hetzner shut down 2026-04-06; GCP torn down 2026-06-06. Sovereign-local stack (RAZZOR-FACCE) — no cloud infra until a trigger fires.
 - 13 vs 22 opportunities = not a bug, main.py overwrites each run
 - No direct `google.generativeai` calls anywhere — Anthropic API for drafting, local corpus for retrieval
 - Dashboard SUSPENDED — rebuild when cloud trigger fires

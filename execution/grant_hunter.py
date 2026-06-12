@@ -21,10 +21,11 @@ import os
 from scraper_grants_api import fetch_all_api_grants
 from scraper_grants_browser import fetch_browser_grants
 
-# Intentional internal intel — see git_publication_safety.md exception note
+# Program-officer intel is loaded from the (gitignored) .env, never hardcoded.
+# Set NSF_AI_DIRECTOR_CONTACT in .env for outreach; public help line is safe to ship.
 NSF_SBIR_CONTACTS = {
-    "AI_Director": "[REDACTED] ([REDACTED] | [REDACTED])",
-    "General_Help": "sbir@nsf.gov | [REDACTED]",
+    "AI_Director": os.getenv("NSF_AI_DIRECTOR_CONTACT", "[redacted — set NSF_AI_DIRECTOR_CONTACT in .env]"),
+    "General_Help": "sbir@nsf.gov | [REDACTED]",  # public NSF SBIR help desk
     "Solicitation": "NSF 24-579",
 }
 

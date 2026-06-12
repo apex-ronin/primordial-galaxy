@@ -33,6 +33,8 @@ historical_archive/
 Portfolio/
 Private/
 peer_review_package/
+peer_review_package.zip
+*.zip
 !data/legal_corpus/
 
 # local toolchain dirs

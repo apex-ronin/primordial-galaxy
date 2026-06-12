@@ -20,7 +20,8 @@ SEED_FAR = [
         "clause_text": "The Contractor shall inform the Contracting Officer and the agency Inspector General immediately of any credible information it receives from any source... that alleges a Contractor employee, subcontractor, or subcontractor employee... has engaged in conduct that violates the policy in paragraph (b) of this clause."
     },
     {
-        "id": "FAR 52.204-21",
+        # Renumbered from FAR 52.204-21 in the Feb 2026 RFO. Primary source: https://www.acquisition.gov/far/52.240-93
+        "id": "FAR 52.240-93",
         "title": "Basic Safeguarding of Covered Contractor Information Systems",
         "vector": "Identity Fraud",
         "clause_text": "The Contractor shall apply the following basic safeguarding requirements and procedures to protect covered contractor information systems... (1) Limit information system access to authorized users, processes acting on behalf of authorized users, or devices..."

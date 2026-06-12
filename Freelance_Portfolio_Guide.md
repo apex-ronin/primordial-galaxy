@@ -29,9 +29,9 @@ My recent work, **GovTech Hunter**, is a production-grade autonomous system desi
 
 **Core Tech Stack:**
 
-* **AI/LLM:** Google Gemini, OpenAI, Venice (Open-source/Uncensored models).
+* **AI/LLM:** Local LLMs (Qwen3 / nomic-embed via LM Studio), Venice AI, Anthropic Claude.
 * **Automation:** Python, Playwright, BeautifulSoup, Requests.
-* **Infrastructure:** GCP (Compute Engine), Docker, Git.
+* **Infrastructure:** Local-first / sovereign inference, Docker, Git.
 * **Security:** Threat Assessment, Vulnerability Analysis, Identity Verification (GPG).
 
 ---

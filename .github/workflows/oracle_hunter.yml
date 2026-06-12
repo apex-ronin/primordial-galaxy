@@ -1,9 +1,15 @@
 name: Oracle A1 Instance Hunter
 
+# RETIRED 2026-06-11 (legacy audit). The Oracle A1 "always-free" hunt was superseded
+# by the sovereign-local architecture decision (STATE.md 2026-06-04) and the 2026-06-06
+# GCP teardown. The scheduled trigger is disabled so it stops consuming Actions minutes.
+# Kept (manual-dispatch only) in case a cloud node is ever needed again. The issue-body
+# SSH/Hetzner references below are historical.
+
 on:
-  schedule:
-    - cron: '*/10 * * * *'   # Every 10 minutes — instances open/close fast
-  workflow_dispatch:          # Manual trigger for testing
+  # schedule:
+  #   - cron: '*/10 * * * *'   # DISABLED — Oracle hunt retired (see note above)
+  workflow_dispatch:          # Manual trigger only
 
 jobs:
   hunt:

@@ -9,15 +9,16 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-def run_red_team_eid(requirements, legacy_systems):
+def run_red_team_eid(requirements, legacy_systems, target="Example Irrigation District"):
     """
-    Performs a Red Team security/risk analysis for the specific ERP target.
+    Performs a Red Team security/risk analysis for a GovTech ERP target.
+    `target` is parameterized — do not hardcode a real district name.
     """
     prompt = f"""
-    You are a Red Team Security Architect for 'Primordial Galaxy'. 
+    You are a Red Team Security Architect for 'Primordial Galaxy'.
     Perform a targeted risk analysis for the following GovTech ERP discovery:
-    
-    TARGET: El Dorado Irrigation District (EID)
+
+    TARGET: {target}
     REQUIREMENTS: {requirements}
     LEGACY SYSTEMS: {legacy_systems}
     
@@ -42,7 +43,7 @@ def run_red_team_eid(requirements, legacy_systems):
         os.makedirs("data", exist_ok=True)
         
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write("# RED TEAM THREAT MATRIX: EID ERP TARGET\n\n")
+            f.write(f"# RED TEAM THREAT MATRIX: {target} (ERP)\n\n")
             f.write(response.text)
         
         print(f"[*] Deep Analysis Complete. Report saved to: {output_path}")

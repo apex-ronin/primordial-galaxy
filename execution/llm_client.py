@@ -36,7 +36,7 @@ LLM_MODE           = os.getenv("LLM_MODE", "auto").lower()
 LAST_PROVIDER = None
 
 # Model assignments
-# "fast"    — bulk analysis (gemini_analyst.py): cheap + quick
+# "fast"    — bulk analysis (gemini_analyst.py — name is legacy, no Gemini): cheap + quick
 # "precise" — legal drafting (antibody_agent.py): higher quality floor
 LOCAL_MODEL_FAST    = os.getenv("LOCAL_MODEL_FAST",    "qwen3-8b")
 LOCAL_MODEL_PRECISE = os.getenv("LOCAL_MODEL_PRECISE", "qwen3-8b")

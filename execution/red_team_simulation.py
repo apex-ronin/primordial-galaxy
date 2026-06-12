@@ -4,30 +4,20 @@ import re
 import random
 import time
 from dotenv import load_dotenv
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
+from llm_client import complete as llm_complete, get_last_provider
 from shared_utils import antibody_prompt_sanitizer_v1, calculate_roi_safe
 
 # Load environment variables
 load_dotenv()
 
-# Configure Gemini API
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 INPUT_FILE = "opportunities.json"
 OUTPUT_FILE = "threat_assessment.json"
 
-def init_vertex():
-    """Initializes Vertex AI for authentication (GCP-based auth)."""
-    PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "govtech-control")
-    LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
-    
-    if not PROJECT_ID:
-        print("[!] GOOGLE_CLOUD_PROJECT not found in .env file")
-        return False
-        
+def init_simulation():
+    """Seeds the simulation. LLM calls route through the local-primary cascade
+    (LM Studio → Venice → Anthropic) via llm_client — no GCP/Vertex auth required."""
     # Entropy-based seed for non-deterministic simulation results
     random.seed(int(time.time()))
-    vertexai.init(project=PROJECT_ID, location=LOCATION)
     return True
 
 def antibody_prompt_sanitizer_v1_local(text):
@@ -155,21 +145,30 @@ Identity-based scoring is a compliance failure under the 2026 DEI Executive Orde
     full_prompt = prompt + dei_prompt_suffix
     
     try:
-        model = GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content(
+        raw = llm_complete(
             full_prompt,
-            generation_config=GenerationConfig(
-                temperature=0.8, # Higher temperature for creative threat modeling
-                max_output_tokens=8192,
-                response_mime_type="application/json"
-            )
+            system="You are a JSON-only API. Output strictly valid JSON. No markdown, no code blocks, no backticks.",
+            mode="precise",  # threat modeling + legal antibody drafting — precision tier
         )
-        
-        result = json.loads(response.text)
+        if not raw:
+            print(f"    [!] All LLM providers failed for '{title}'")
+            return None
+        # Strip accidental markdown fences
+        if "```" in raw:
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.split("```")[0]
+        result = json.loads(raw.strip())
         if isinstance(result, list):
             return result[0] if result else None
+        if isinstance(result, dict):
+            result["_llm_provider"] = get_last_provider() or "unknown"
         return result
-        
+
+    except json.JSONDecodeError as e:
+        print(f"    [!] JSON parse error for '{title}': {e}")
+        return None
     except Exception as e:
         print(f"    [!] Analysis failed for '{title}': {e}")
         return None
@@ -179,7 +178,7 @@ def main():
     print("PROJECT BLOOD DIAMOND: RED TEAM SIMULATION")
     print("="*60)
     
-    if not init_vertex():
+    if not init_simulation():
         return
 
     # Load existing opportunities

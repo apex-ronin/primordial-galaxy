@@ -12,6 +12,8 @@ Sources:
                   NOTE: API returns 429 during maintenance windows — scraper degrades gracefully.
 
 Policy context (OMB M-26-04 / GSAR 552.239-7001 / WAS):
+  NOTE: GSAR 552.239-7001 is PROPOSED (refresh-32, not binding) as of June 2026 —
+  do not treat as an enforceable citation. See directives/OMB_AI_POLICY_REFERENCE.md.
   Filters and keywords are tuned to surface AI, cybersecurity, and critical-infrastructure
   opportunities aligned with the 2026 federal buying environment.
 """

@@ -41,4 +41,4 @@
 * **API Reverse Engineering**
 * **Self-Healing Software Architecture**
 * **GovTech / Procurement Security**
-* **Google Gemini / OpenAI / Venice AI**
+* **Local LLMs (Qwen3) / Venice AI / Anthropic Claude**

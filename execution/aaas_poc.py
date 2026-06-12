@@ -1,19 +1,14 @@
 import os
 import json
 import re
-from google import genai
-from google.genai import types
 from dotenv import load_dotenv
+from llm_client import complete as llm_complete
 
 load_dotenv()
 
-# Initialize Gemini Client
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=GEMINI_API_KEY)
-
 def scrub_pii(text):
     """
-    Uses Gemini to identify and mask PII and sensitive agency details.
+    Uses the local-primary LLM cascade to identify and mask PII and sensitive agency details.
     """
     prompt = f"""
     You are a GovTech Anonymization Agent (AaaS). 
@@ -35,11 +30,8 @@ def scrub_pii(text):
     """
     
     try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
-        return response.text
+        result = llm_complete(prompt, mode="fast")
+        return result if result else text
     except Exception as e:
         print(f"[!] AaaS Scrubbing Failed: {e}")
         return text
@@ -73,15 +65,16 @@ def create_anonymized_intelligence(raw_finding):
     return output_path
 
 if __name__ == "__main__":
-    # Test Data from EID Deep Dive
-    eid_finding = {
-        "agency": "El Dorado Irrigation District (EID)",
-        "rfp_id": "RFP26-03 (24046.01)",
-        "officer": "Penny [REDACTED], Project Manager",
-        "contact": "530-642-4139 | [REDACTED]",
+    # Synthetic test data — demonstrates the scrubbing pipeline without exposing real
+    # agency/officer PII (this file may ship in a public portfolio).
+    sample_finding = {
+        "agency": "Example Regional Water District",
+        "rfp_id": "RFP00-00 (00000.00)",
+        "officer": "Jane Doe, Project Manager",
+        "contact": "555-555-0100 | jdoe@example.gov",
         "budget_info": "Software & Implementation Experience (25% weight), Price Proposal (20% weight)",
-        "legacy_systems": "Excel, Great Plains, Crystal Reports, IPS, Kronos, NeoGov, Target Solutions",
-        "requirements": "Integrated ERP solution, mobile support, no-code/low-code configuration, CIP planning live by Oct 2026."
+        "legacy_systems": "Excel, Generic ERP, Reporting Suite, Timekeeping System",
+        "requirements": "Integrated ERP solution, mobile support, no-code/low-code configuration, CIP planning live by Q4."
     }
-    
-    create_anonymized_intelligence(eid_finding)
+
+    create_anonymized_intelligence(sample_finding)

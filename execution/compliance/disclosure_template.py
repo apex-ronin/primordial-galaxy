@@ -11,8 +11,9 @@ procurement or contract action.
    Unbiased AI Principles — truth-seeking (outputs reflect evidence, not desired conclusions)
    and ideological neutrality (no partisan slant introduced by model or prompt design).
 
-2. Model transparency: Built on Vertex AI / Google Gemini and Anthropic Claude via Vertex.
-   No proprietary training data from end-user interactions is used.
+2. Model transparency: Built on a sovereign local LLM cascade (local LM Studio → Venice AI
+   → Anthropic Claude API). No government data is used for model training, and no proprietary
+   training data from end-user interactions is used.
 
 3. Acceptable use: Output is provided for analytical support only. It does not constitute
    legal advice, a binding compliance determination, or an agency decision.
