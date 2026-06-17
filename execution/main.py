@@ -3,6 +3,7 @@ import os
 import shutil
 import sys
 import tempfile
+from datetime import datetime
 from dotenv import load_dotenv
 from hunter_eyes import fetch_opportunities
 from hunter_brain import analyze_opportunity
@@ -16,6 +17,8 @@ OUTPUT_FILE = "opportunities.json"
 
 def main():
     load_dotenv()
+
+    run_started_at = datetime.now().isoformat()
 
     print("="*60)
     print("GovTech Hunter v0.6 - CSDA Honey Pot Active")
@@ -62,6 +65,14 @@ def main():
         fetch_grant_opportunities
     )
     results_grants = results_grants_raw.get('data', [])
+
+    # Per-source counts for the observability run record (raw acquisition,
+    # before scoring). Keyed by the module's display name.
+    source_counts = {
+        "CSDA (Honey Pot)": len(results_csda),
+        "SAM.gov (The Whale)": len(results_sam),
+        "Grant Hunter (Foundations)": len(results_grants),
+    }
 
     # Consolidate
     all_opportunities = orchestrator.consolidate_results([
@@ -128,6 +139,24 @@ def main():
         contact = h.get('contact')
         if contact:
             print(f"    [+] POINT OF CONTACT: {contact}")
+
+    # 4. Observability — record this run into the SQLite spine for the dashboard.
+    # Non-fatal by design: any failure here is logged and swallowed so the
+    # observability layer can never take down acquisition.
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from observatory.recorder import record_run
+        log_path = os.environ.get("SCAN_LOG_PATH")  # set by run_scanner.ps1
+        run_id = record_run(
+            scored_opportunities=scored_opportunities,
+            source_counts=source_counts,
+            errors=orchestrator.errors,
+            started_at=run_started_at,
+            log_path=log_path,
+        )
+        print(f"[*] Observatory: recorded run #{run_id} to data/primordial.db")
+    except Exception as e:
+        print(f"[!] Observatory recorder failed (non-fatal): {e}")
 
     orchestrator.shutdown()
 

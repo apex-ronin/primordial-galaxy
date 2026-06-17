@@ -42,6 +42,10 @@ $env:PYTHONIOENCODING = "utf-8"
 # Real binaries live on G: - neutral, SYSTEM-visible, survives app uninstall.
 $env:PLAYWRIGHT_BROWSERS_PATH = "G:\AI-Models\ms-playwright"
 
+# Tell the Observatory recorder which log file this run wrote to, so the
+# dashboard can deep-link from a run record to its raw log.
+$env:SCAN_LOG_PATH = $LogFile
+
 # Run pipeline
 Push-Location $ExecutionDir
 try {
