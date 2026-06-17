@@ -100,7 +100,7 @@ Phase 4: Publication (optional)
 
 ## Prerequisites
 
-- Python 3.13+
+- Python 3.12+
 - [Playwright](https://playwright.dev/python/) with Chromium: `python -m playwright install --with-deps chromium`
 - **LM Studio** running locally (Qwen3-8b, OpenAI-compatible endpoint) for the free primary tier — optional; the cascade falls back to Venice/Anthropic if it is down
 - **Venice AI** API key (optional fallback tier)

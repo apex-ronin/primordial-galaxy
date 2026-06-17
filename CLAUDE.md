@@ -97,7 +97,7 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 ## Source of Truth Files
 
 - **This session:** `primordial_galaxy_roadmap.md` (project root)
-- **Cross-project:** `C:\Users\jnel9\OneDrive\Workspaces\APEX_RONIN_FUNCTIONAL_ROADMAP.md` — synced to STATE.md 2026-06-06
+- **Global / cross-project ledger:** `G:\Workspaces\STATE.md` — canonical. (The old OneDrive `APEX_RONIN_FUNCTIONAL_ROADMAP.md` did not survive OneDrive retirement on 2026-06-14; STATE.md absorbed it.)
 - **directives/ files:** ARCHIVED — historical reference only
 
 ## Model Preferences

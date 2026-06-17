@@ -1,13 +1,22 @@
 # PRIMORDIAL GALAXY — Roadmap
 
-**Owner:** Jay Nelson | **Updated:** 2026-06-11 | **Session:** v14
+**Owner:** Jay Nelson | **Updated:** 2026-06-16 | **Session:** v16
+
+> Global cross-project ledger = `G:\Workspaces\STATE.md` (the old OneDrive
+> APEX_RONIN_FUNCTIONAL_ROADMAP.md did not survive OneDrive retirement; STATE.md
+> is now canonical for cross-project state).
 
 ---
 
 ## STATUS
 
-Core pipeline complete. Whitepaper published (v2.1, 2026-06-04). GCP fully torn down (2026-06-06) — clean slate, local-primary architecture. Vertex Discovery Engine gone with govtech-control. Legal corpus source JSONs confirmed on disk (104 clauses, 8 files). Outreach gate cleared.
-**Active work: grant scanner cron → outreach.**
+Core pipeline complete + **Observatory (live observability) built and proven running unattended.** Whitepaper published (v2.1, 2026-06-04). GCP fully torn down (2026-06-06) — clean slate, local-primary architecture. Legal corpus on disk (104 clauses, 8 files). Daily scanner clean 06-14→06-16 (Venice-served).
+
+**Two priorities for next session (front and center):**
+1. **Fix the local LLM tier** — it's been DOWN 3 days. LM Studio server is logon-triggered, so the 07:00 scan runs with no local tier when Jay isn't logged in. Move it to a **boot** trigger. (Venice covers it, but it's costing credits + dropping antibody retrieval to keyword.)
+2. **American-models-only scrub** — Jay's directive. VERIFY the regulatory basis against primary sources first (see Open Decisions), then swap the Chinese daily-driver `qwen3-8b` → an American model (gemma/llama).
+
+**Then:** public-flip prep — surgical history scrub (keep history, Method A) + corpus open/closed decision + license + collaboration files. **Decision locked: keep git history (proof-of-work), invite collaboration openly.**
 Scott Nelson engagement permanently closed — building on merit, own timeline.
 
 ---
@@ -39,6 +48,9 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 | M-26-04 disclosure (item 6) | 1d7816b | Wedge injected to antibody prompt; superseded 2026-06-03 by stamp function |
 | M-26-04 disclosure_template.py | — | `execution/compliance/disclosure_template.py` — canonical 4-element stamp_disclosure(). Replaces TTSI_SPEC_v2 runtime gate. |
 | TTSI_SPEC_v2 reviewed + killed | — | Runtime gate was wrong layer for current scale. Disclosure is a human-review + stamp obligation. See Settled Decisions. |
+| **Observatory — live dashboard + run recorder** | v16 (06-16) | `observatory/` pkg: SQLite spine (`data/primordial.db`: runs/opportunities/corpus_docs), FastAPI live dashboard (`run_dashboard.ps1`, :8787), non-fatal recorder hook in main.py. **Verified auto-recording unattended** (runs #2,#3). Surfaces which LLM tier served — caught local tier down 3 days. |
+| **govinfo.gov research + ingest** | v16 (06-16) | `docs/GOVINFO_RESEARCH_2026-06-14.md` + `observatory/ingest.py`. EOs via Federal Register API (current to EO 14411), GAO via govinfo collections (historical archive). 74 docs seeded into corpus_docs. Sets up arc #4 (antibody ORACLE). |
+| **Pre-public history audit (checklist)** | v16 (06-16) | `G:\Workspaces\GITHUB_PRE_PUBLIC_CHECKLIST.md` (reusable). Ran live: secrets CLEAN (no key ever in history); **PII BLOCKER** — [REDACTED] NSF contact in 7 historical commits + 4 tracked docs. Scrub staged (Method A), not executed. |
 
 ---
 
@@ -48,6 +60,10 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 |---|---|---|
 | 1 | LLC filing — deferred to post-revenue. Sole prop until first paying client. | Does not block pipeline or outreach |
 | 2 | ~~Whitepaper publish~~ | ✅ CLOSED — v2.1 live at apex-ronin/Rise-Of-The-Prompt-Kiddie (2026-06-04) |
+| 3 | **Public-flip: GO in principle (Jay), but GATED on a clean scrub.** Current-files audit passed, but HISTORY is not clean ([REDACTED] PII). Decision: keep history → **Method A surgical scrub** (filter-repo, redact PII strings + drop 4 internal docs), NOT re-init. | Blocks flip until scrub done + checklist re-run zero-hits |
+| 4 | **Legal corpus in the public repo — open / sample / closed?** Full 104-clause set is currently committed in primordial. Clause text is public law; the curation + vector tagging is the IP overlap with the private legal-corpus repo. Leaning: open it (it's defensive knowledge; moat is principalities + service, not clause tags). UNDECIDED. | Blocks flip — must decide what data ships public |
+| 5 | **License** — permissive (MIT/Apache) vs noncommercial source-available (BSL/PolyForm). "See & run but don't commercialize" = noncommercial. UNDECIDED. | Blocks collaboration (collaborators need a license) |
+| 6 | **American-models-only** — VERIFY the regulatory basis (is there a *binding* rule, or just EO 14179 pro-dominance + congressional urging on FAR/PRC?). Then swap qwen daily-driver. | Strategically sound for govtech regardless; verify before stating as compliance |
 
 ---
 
@@ -64,11 +80,11 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 
 ## EXECUTION ORDER — NEXT SESSION
 
-1. **Grant scanner cron** — ✅ scheduled via Windows Task Scheduler task `GovTechHunterDaily` → `run_scanner.ps1` (local G:). Confirm it is enabled and firing.
-2. **Fix source bugs** — grants.gov API key (register at grantsolutions.gov) · sbir.gov URL update · CalOSBA URL verify. (Google Discovery is permanently retired — `discovery_engine.py` is a no-op stub; do not "skip or stub until cloud rebuilt", it is already done.)
-3. **Bug run** — full pipeline end-to-end. Verify antibody agent on the local cascade, FAISS retrieval quality, output shape. Pair with the drafter `actor`/`teeth` prompt fix (see Spec Gaps).
-4. **Outreach** — two M-26-04 email drafts ready. Send after bug run confirms pipeline is clean.
-5. **Dashboard** — rebuild after first paying client or when cloud trigger fires (FedRAMP customer / volume / collaborator).
+1. **FRONT AND CENTER — fix the local LLM tier.** Down 3 days. Root cause: LM Studio server is **logon**-triggered (`LMStudioServerAtLogon`), so the 07:00 SYSTEM scan finds nothing listening when Jay isn't logged in. Move server+model autostart to a **boot** trigger (or a SYSTEM service) so the sovereign-local tier is live at 07:00 regardless of login. Verify: a 07:00 run shows `local=UP` on the dashboard.
+2. **FRONT AND CENTER — American-models-only scrub.** (a) VERIFY primary sources: is there a *binding* rule requiring American models, or only EO 14179 (pro-dominance, not a mandate) + the Moolenaar FAR/PRC urging? Cite primary URLs per CLAUDE.md principle #3. (b) Swap the Chinese daily-driver `qwen3-8b` (and `qwen3.6-moe`) → American model (`gemma` is downloaded; or a Llama). Re-point `LOCAL_MODEL_FAST`/`LOCAL_MODEL_PRECISE` in `.env`. Note: embedder `nomic-embed` = US ✅, Venice `llama` = US ✅, Anthropic = US ✅; `hermes` base = Mistral (French).
+3. **Public-flip prep** (gated, Jay-supervised) — execute the surgical scrub (`G:\Workspaces\_private\primordial-galaxy-internal\SCRUB_RUNBOOK.md`, Method A): redact [REDACTED] PII + drop 4 internal docs from history, re-run pre-public checklist → zero hits. THEN resolve corpus (open/sample/closed) + license, add collaboration files (README invite, CONTRIBUTING.md, LICENSE, CODE_OF_CONDUCT.md). Flip only when all green.
+4. **Outreach** — two M-26-04 email drafts ready. Send after pipeline + flip settled.
+5. **Arc #4 — antibody ORACLE** (when ready): Title 48 granule ingest → full-text fill → embed corpus_docs to FAISS → flip `embedded=1`. Needs a real `GOVINFO_API_KEY` in `.env` for bulk.
 
 ---
 
@@ -83,11 +99,14 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 | Legal corpus | ON DISK ✅ | 104 clauses, 8 source JSONs at `data/legal_corpus/`. Vertex datastore gone — source files are ground truth. |
 | Antibody drafter | CLAUDE SONNET ✅ | claude-sonnet-4-6 via Anthropic API (Vertex endpoint deleted with project) |
 | Vertex Discovery Engine | DEAD | Deleted with govtech-control. Bug 1 (Google Discovery 0 results) is now permanent until cloud rebuilt. |
-| Grant Hunter | COMPLETE ✅ — NOT SCHEDULED | Pipeline works. Needs local cron. |
+| Grant Hunter | SCHEDULED ✅ | `GovTechHunterDaily` 07:00 daily. Clean runs 06-14→06-16. |
+| Observatory (local) | LIVE ✅ | `observatory/` — SQLite + FastAPI dashboard (`run_dashboard.ps1`). Auto-records every run. Distinct from the old cloud HUD. |
+| Local LLM tier | ⚠️ DOWN 3 days | LM Studio logon-triggered → not up at 07:00 SYSTEM scan. Venice covering. FIX = boot trigger (priority #1). |
+| Models in stack | ⚠️ Chinese present | Daily-driver `qwen3-8b` + `qwen3.6-moe` = Chinese (Alibaba). `gemma`/`llama`/`anthropic`/`nomic-embed` = US. American-only scrub = priority #2. |
 | M-26-04 compliance | STAMP FUNCTION ✅ | `compliance/disclosure_template.py:stamp_disclosure()` |
-| SAM.gov API key | LIVE ✅ | Verified 2026-04-14 |
+| SAM.gov API key | LIVE ✅ | Verified 2026-04-14. Rotation reminder ~2026-07-02. |
 | Whitepaper | PUBLISHED ✅ | v2.1 live — apex-ronin/Rise-Of-The-Prompt-Kiddie (2026-06-04) |
-| Dashboard | SUSPENDED | Rebuild when cloud trigger fires or first paying client. |
+| Cloud HUD (old) | SUSPENDED | The *cloud* dashboard — rebuild when cloud trigger fires. (Local Observatory above is the current observability surface.) |
 | Brand | SETTLED ✅ | Sole operator. apexronin.com owned. apex-ronin GitHub org live. |
 | LLC | DEFERRED | Post-revenue. Sole prop for now. |
 | Scott Nelson | PERMANENTLY CLOSED | Own merit, own timeline. Do not contact. |
@@ -120,4 +139,6 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 | handoff sprint | 2026-05-14 | Corpus 33→104, drafter→Claude Sonnet, corpus ingested, item6 complete, handoff package | 1d7816b |
 | v12 | 2026-06-03 | TTSI_SPEC_v2 reviewed + killed; disclosure_template.py built; full roadmap audit + sync | — |
 | v13 | 2026-06-10 | Handoff Items 3.1–3.4: AI-gate fix (>100-char silent keyword fallback root-caused — not an LLM outage), honest analysis_method tier label, diag scripts deleted, doc_fetcher.py document pull (login-wall aware). | — |
-| v14 | 2026-06-11 | Sonnet legacy audit (43 findings) + fix pass: red_team_simulation.py & aaas_poc.py rewired Vertex/Gemini→cascade; disclosure_template.py model attribution fixed; README full rewrite; stale Vertex/Hetzner/Scott docs archived to `_ARCHIVE/`; dead Gemini/Vertex scripts → `_archive_vertex/`/`_archive_legacy/`; peer_review_package.zip untracked; FAR/oracle/whitepaper-preface fixes. | (pending) |
+| v14 | 2026-06-11 | Sonnet legacy audit (43 findings) + fix pass: red_team_simulation.py & aaas_poc.py rewired Vertex/Gemini→cascade; disclosure_template.py model attribution fixed; README full rewrite; stale Vertex/Hetzner/Scott docs archived to `_ARCHIVE/`; dead Gemini/Vertex scripts → `_archive_vertex/`/`_archive_legacy/`; peer_review_package.zip untracked; FAR/oracle/whitepaper-preface fixes. | 46b72cf |
+| v15 | 2026-06-12 | Audit round 2: 5 new findings (1 high/2 med/2 low) + 2 partials, fixed. Audit round 3: PASS-CLEAN, zero medium+ findings — 3-round loop converged. NSF program-officer PII final-stripped from all tracked files, `.env`-driven. Ready to flip working parts public on Jay's go. | 2b45872, 5b351c2 |
+| v16 | 2026-06-16 | Built **Observatory** (SQLite spine + FastAPI live dashboard + non-fatal run recorder; verified auto-recording unattended). **govinfo.gov research + ingest** (74 corpus_docs seeded; EOs via Federal Register, GAO via govinfo). **Pre-public history audit** + reusable checklist — caught [REDACTED] PII in history (scrub staged Method A, not run). Decisions: keep git history (proof-of-work), invite collaboration openly, Conventional Commits. Surfaced: local tier down 3 days (logon-trigger) + Chinese daily-driver model. | _this session_ |
