@@ -99,9 +99,10 @@ def _ensure_parent() -> None:
 def connect(db_path: str | None = None) -> sqlite3.Connection:
     """Open a connection with row access by name and FK enforcement on."""
     _ensure_parent()
-    conn = sqlite3.connect(db_path or DB_PATH)
+    conn = sqlite3.connect(db_path or DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")  # wait, don't error, on concurrent writes
     return conn
 
 
