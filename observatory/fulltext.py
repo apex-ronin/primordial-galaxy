@@ -87,8 +87,10 @@ def _url_for(row) -> str | None:
         # CFR granules expose xml/pdf (no htm). xml -> text strips cleanly.
         return f"{GOVINFO_BASE}/packages/{pkg}/granules/{gid}/xml?api_key={GOVINFO_KEY}"
     if source == "gao":
-        # GAO packages expose txt (no htm/xml). Plain text -> _strip_html is a no-op.
-        return f"{GOVINFO_BASE}/packages/{row['citation']}/txt?api_key={GOVINFO_KEY}"
+        # GAO packages: the summary's "txtLink" actually resolves to the /htm path;
+        # the bare /txt path 400s for older GAOREPORTS. _strip_html cleans the htm.
+        # (Verified live 2026-06-27; matches this module's docstring routing.)
+        return f"{GOVINFO_BASE}/packages/{row['citation']}/htm?api_key={GOVINFO_KEY}"
     return None  # eo handled via its ingest abstract
 
 

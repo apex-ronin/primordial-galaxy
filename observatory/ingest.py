@@ -30,7 +30,14 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 
+from dotenv import load_dotenv
+
 from . import db
+
+# Load .env so standalone module runs (python -m observatory.ingest/.fulltext) pick
+# up GOVINFO_API_KEY just like execution/main.py does. Without this, GOVINFO_KEY
+# below silently falls back to DEMO_KEY (heavily rate-limited / 400s on some paths).
+load_dotenv()
 
 GOVINFO_BASE = "https://api.govinfo.gov"
 FR_BASE = "https://www.federalregister.gov/api/v1"
