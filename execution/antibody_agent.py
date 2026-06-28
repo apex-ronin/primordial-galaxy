@@ -32,11 +32,16 @@ EMBED_URL = os.environ.get(
     "LOCAL_LLM_BASE_URL", "http://localhost:1234/v1"
 ).rstrip("/") + "/embeddings"
 LEGAL_INDEX = "legal_corpus"
+CORPUS_INDEX = "corpus_docs"
+# Searched together and merged by cosine score (Jay's call: keep the curated
+# legal_corpus distinct from the raw FAR/GAO corpus_docs on disk, but blend at
+# query time). Both follow the same manifest contract and carry clause_text inline.
+RETRIEVE_INDEXES = (LEGAL_INDEX, CORPUS_INDEX)
 
 
-@lru_cache(maxsize=1)
-def _load_legal_index():
-    """Load (manifest_entry, faiss_index, metadata_rows) for the legal corpus, cached.
+@lru_cache(maxsize=4)
+def _load_index(name: str):
+    """Load (manifest_entry, faiss_index, metadata_rows) for an index, cached.
 
     faiss is imported lazily so a missing dependency degrades to the keyword
     fallback instead of crashing module import in the unattended scanner.
@@ -44,7 +49,7 @@ def _load_legal_index():
     import faiss  # lazy
 
     manifest = json.loads((INDEX_DIR / "index_manifest.json").read_text(encoding="utf-8"))
-    entry = manifest[LEGAL_INDEX]
+    entry = manifest[name]
     index = faiss.read_index(str(INDEX_DIR / entry["index_file"]))
     meta = [
         json.loads(line)
@@ -56,19 +61,17 @@ def _load_legal_index():
     return entry, index, meta
 
 
-def _retrieve_semantic_records(vector: str, k: int = 5) -> List[Dict[str, str]]:
-    """Semantic retrieval over the local nomic-embed FAISS index.
+def _embed_query(vector: str):
+    """Embed a query string with the index embedder (manifest-driven), L2-normalized.
 
-    Mirrors ronin/app/agents/prism_tools.py: embeds the query with the same
-    embedder the index was built with (manifest-driven), cosine via an
-    L2-normalized IndexFlatIP. Returns {id, clause_text} records, best score
-    first — reaching all 104 corpus clauses, not just the JSONs on disk.
+    Both indexes share the same embedder + query_prefix, so one embedding serves
+    both searches.
     """
     import faiss  # lazy
     import numpy as np  # lazy
     import requests  # lazy
 
-    entry, index, meta = _load_legal_index()
+    entry, _, _ = _load_index(LEGAL_INDEX)
     resp = requests.post(EMBED_URL, json={
         "model": entry["embedder"],
         "input": [entry["query_prefix"] + vector],
@@ -76,16 +79,50 @@ def _retrieve_semantic_records(vector: str, k: int = 5) -> List[Dict[str, str]]:
     resp.raise_for_status()
     vec = np.array([resp.json()["data"][0]["embedding"]], dtype=np.float32)
     faiss.normalize_L2(vec)
+    return vec
 
-    scores, ids = index.search(vec, k)
-    out = []
-    for i in ids[0]:
-        if i < 0:
+
+def _retrieve_semantic_records(vector: str, k: int = 5) -> List[Dict[str, str]]:
+    """Semantic retrieval merged across the curated + raw corpora.
+
+    Mirrors ronin/app/agents/prism_tools.py for the embedding contract. Embeds the
+    query once, searches BOTH the curated legal_corpus (104 clauses) and the raw
+    corpus_docs FAR/GAO index (728 docs), then merges hits by cosine score and
+    returns the best k as {id, clause_text} records. corpus_docs hits expose their
+    citation as the id, so the grounding gate (_is_grounded) now anchors against
+    every FAR Part 52 clause, not just the curated set. Retrieve wide, feed thin:
+    search is cheap (flat index); the drafter is fed only the top few (see generate()).
+    """
+    vec = _embed_query(vector)
+    pooled: List[Tuple[float, Dict[str, str]]] = []
+    for name in RETRIEVE_INDEXES:
+        try:
+            _, index, meta = _load_index(name)
+        except (KeyError, FileNotFoundError):
+            continue  # index not built yet -> skip; the other still serves
+        scores, ids = index.search(vec, k)
+        for score, i in zip(scores[0], ids[0]):
+            if i < 0:
+                continue
+            rec = meta[i]
+            text = rec.get("clause_text", "")
+            if not text:
+                continue
+            cid = rec.get("id") or rec.get("citation") or ""
+            pooled.append((float(score), {"id": cid, "clause_text": text}))
+    # The curated legal_corpus and raw corpus_docs overlap on some FAR citations,
+    # so dedup by normalized citation and keep the higher-scored copy (usually the
+    # curated one) — never spend a feed-thin slot on the same clause twice.
+    pooled.sort(key=lambda t: t[0], reverse=True)
+    out, seen = [], set()
+    for _, rec in pooled:
+        key = "".join(str(rec["id"]).upper().split())
+        if key and key in seen:
             continue
-        rec = meta[i]
-        text = rec.get("clause_text", "")
-        if text:
-            out.append({"id": rec.get("id", ""), "clause_text": text})
+        seen.add(key)
+        out.append(rec)
+        if len(out) >= k:
+            break
     return out
 
 
@@ -248,7 +285,9 @@ def generate(opportunity: Dict[str, Any], threat_assessment: Dict[str, Any]) -> 
                 "high-stakes use cases."
             )
 
-    corpus_context = "\n".join(f"- {t}" for t in relevant_legal_text[:3])
+    # Feed thin: top 3 retrieved clauses, each capped, so the drafter prompt stays
+    # bounded no matter how large the corpus grows (corpus_docs bodies can be long).
+    corpus_context = "\n".join(f"- {t[:1200]}" for t in relevant_legal_text[:3])
     if m26_policy_snippet:
         corpus_context += "\n" + m26_policy_snippet
 

@@ -40,6 +40,7 @@ QUERY_PREFIX = "search_query: "
 BATCH_SIZE = 32
 MAX_RETRIES = 5
 MAX_CHARS = 6000  # nomic context is ~2k tokens; cap long clauses before embedding
+MAX_META_CHARS = 1500  # clause_text stored inline in meta for the antibody oracle (retrieve wide, feed thin)
 
 INDEX_DIR = Path(r"G:\AI-Models\indexes")
 NAME = "corpus_docs"
@@ -72,6 +73,7 @@ def load_rows(limit: int | None = None) -> list[dict]:
     with db.session() as conn:
         for r in conn.execute(sql).fetchall():
             body = (r["text"] or "")[:MAX_CHARS]
+            embed_text = f"{r['citation']} {r['title'] or ''}. {body}"
             rows.append({
                 "doc_id": r["doc_id"],
                 "source": r["source"],
@@ -80,7 +82,11 @@ def load_rows(limit: int | None = None) -> list[dict]:
                 "title": r["title"],
                 "url": r["url"],
                 "published": r["published"],
-                "embed_text": f"{r['citation']} {r['title'] or ''}. {body}",
+                # Self-contained clause body in the meta sidecar (mirrors legal_corpus)
+                # so the antibody oracle reads it straight from the index, no DB coupling.
+                # Embed on the full body (above); store a lean copy for the drafter feed.
+                "clause_text": embed_text[:MAX_META_CHARS],
+                "embed_text": embed_text,
             })
     return rows
 
