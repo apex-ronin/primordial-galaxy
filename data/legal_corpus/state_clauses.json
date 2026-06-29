@@ -1,0 +1,14 @@
+[
+    {
+        "id": "CA PCC § 3008",
+        "title": "Reporting Bid Rigging",
+        "vector": "Bid Rigging",
+        "clause_text": "This section outlines the process for reporting bid rigging activities. It specifically applies to bid rigging involving local government agencies and their employees, including those at the county, city, and school district levels. The intent is to provide a mechanism for identifying and addressing collusive bidding practices in public procurement."
+    },
+    {
+        "id": "CA Government Code § 12650",
+        "title": "False Claims Act: Definitions and Liability",
+        "vector": "False Claims, Defective Pricing, Cost Mischarging",
+        "clause_text": "This section defines a 'claim' as any request or demand for money, property, or services made to the state or a political subdivision. It also defines 'knowing' and 'knowingly' in relation to information, emphasizing that a person acts with 'knowing' intent if they have actual knowledge, act in deliberate ignorance, or act in reckless disregard of the truth or falsity of the information. Liability arises when a person knowingly makes, uses, or causes to be made or used a false record or statement material to a false or fraudulent claim, or knowingly makes, uses, or causes to be made or used a false record or statement to conceal, avoid, or decrease an obligation to pay or transmit money or property to the state or a political subdivision."
+    }
+]

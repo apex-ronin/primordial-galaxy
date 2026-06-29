@@ -1,0 +1,14 @@
+[
+    {
+        "id": "DFARS 252.204-7021",
+        "title": "Cybersecurity Maturity Model Certification (CMMC) Requirements",
+        "vector": "CMMC, Cybersecurity, CUI, Covered Defense Information",
+        "clause_text": "This clause, effective November 10, 2025, requires contractors and subcontractors that will process, store, or transmit Covered Defense Information (CDI) to obtain and maintain a Cybersecurity Maturity Model Certification (CMMC) at the level specified in the contract prior to contract award or at contract performance. The contractor must maintain the required CMMC level for the duration of the contract. Failure to maintain CMMC certification constitutes a material breach. The clause requires flow-down to subcontractors at any tier that will process, store, or transmit CDI. Contractors at CMMC Level 2 must undergo a third-party assessment every three years conducted by a CMMC Third-Party Assessor Organization (C3PAO) or submit an annual self-assessment if authorized. CMMC Level 3 requires government-led assessments."
+    },
+    {
+        "id": "DFARS 252.204-7012",
+        "title": "Safeguarding Covered Defense Information and Cyber Incident Reporting",
+        "vector": "CMMC, Cybersecurity, CUI, Covered Defense Information, Incident Reporting",
+        "clause_text": "This clause requires contractors to apply adequate security to all covered defense information on all covered contractor information systems used in performance of the contract. Adequate security means protective measures commensurate with the consequences and probability of loss, misuse, or unauthorized access to or modification of information. Contractors must implement NIST SP 800-171 controls on all systems handling Covered Defense Information. Within 72 hours of discovering a cyber incident, the contractor must report it to the DoD at dibnet.dod.mil. The contractor must preserve and protect all images of compromised information systems and relevant monitoring/packet-capture data for at least 90 days. The contractor must also conduct a damage assessment to determine compromised CDI and submit results to the Contracting Officer."
+    }
+]

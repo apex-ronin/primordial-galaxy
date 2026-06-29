@@ -1,0 +1,8 @@
+[
+    {
+        "id": "DFARS 252.227-7013",
+        "title": "Rights in Technical Data—Noncommercial Items",
+        "vector": "Data Rights, Technical Data, IP, Intellectual Property, Government License",
+        "clause_text": "This clause governs the Government's rights to technical data for noncommercial items developed under a DoD contract. The Government receives unlimited rights in technical data pertaining to: items, components, or processes developed exclusively with Government funds; form, fit, and function data; corrections or changes to Government-furnished data; and data necessary to operate, maintain, or install items. The contractor retains limited rights in technical data pertaining to items developed exclusively at private expense, which means the Government may only use such data within the Government, cannot release it outside the Government, and must mark it as protected. For items developed with mixed funding, the Government receives Government-purpose rights for five years, after which unlimited rights attach. Contractors must assert restrictions prior to contract award."
+    }
+]

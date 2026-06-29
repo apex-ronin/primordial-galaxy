@@ -1,0 +1,26 @@
+[
+    {
+        "id": "FAR 52.203-3",
+        "title": "Gratuities",
+        "vector": "Bribery, Kickbacks",
+        "clause_text": "The Government may terminate the contractor's right to proceed if the contractor, its agent, or representative offered or gave a gratuity to a Government official with the intent to obtain a contract or favorable treatment. If terminated, the Government is entitled to remedies for breach of contract and exemplary damages of 3 to 10 times the cost incurred by the Contractor in giving gratuities."
+    },
+    {
+        "id": "FAR 52.203-5",
+        "title": "Covenant Against Contingent Fees",
+        "vector": "Kickbacks, Undue Influence, Bribery",
+        "clause_text": "The contractor warrants that no person or agency has been employed or retained to solicit or obtain the contract upon an agreement for a contingent fee, except for bona fide employees or agencies. Breach of this warranty gives the Government the right to annul the contract without liability, or to deduct the full amount of the contingent fee from the contract price."
+    },
+    {
+        "id": "FAR 52.203-7",
+        "title": "Anti-Kickback Procedures",
+        "vector": "Kickbacks, Bribery",
+        "clause_text": "This clause prohibits kickbacks, defined as any money, fee, commission, credit, gift, gratuity, thing of value, or compensation given to improperly obtain or reward favorable treatment in connection with a prime contract or subcontract. Contractors must have procedures to prevent and detect kickbacks, and cooperate fully with any Federal agency investigating kickbacks. Violations can result in criminal penalties, civil penalties, and administrative actions such as suspension or debarment."
+    },
+    {
+        "id": "FAR 52.203-16",
+        "title": "Preventing Personal Conflicts of Interest",
+        "vector": "Conflicts of Interest",
+        "clause_text": "This clause requires contractors to prevent personal conflicts of interest for covered employees performing under the contract. It mandates procedures to identify, prevent, and mitigate such conflicts, including not assigning employees to tasks where a conflict exists. Contractors must also ensure employees do not use non-public information gained through contract performance for personal gain."
+    }
+]

@@ -1,0 +1,8 @@
+[
+    {
+        "id": "Section 508 — 29 U.S.C. § 794d",
+        "title": "Section 508 ICT Accessibility Requirements",
+        "vector": "Section 508, Accessibility, ICT, Disability, Assistive Technology, Web Standards",
+        "clause_text": "Section 508 of the Rehabilitation Act of 1973 requires Federal agencies to ensure that Information and Communications Technology (ICT) they develop, procure, maintain, or use is accessible to people with disabilities. Contractors providing ICT to Federal agencies must comply with the Access Board's ICT Accessibility Standards (36 C.F.R. Part 1194), which incorporate WCAG 2.0 Level AA guidelines for web content and equivalent functional performance criteria for hardware and software. The contractor must provide an Accessibility Conformance Report (ACR) based on the Voluntary Product Accessibility Template (VPAT) for all ICT deliverables. The contractor must remediate accessibility defects identified by the Government within specified timeframes and must ensure third-party components integrated into deliverables also meet Section 508 standards. Noncompliance may result in contract termination or mandatory corrective action plans."
+    }
+]
