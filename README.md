@@ -1,204 +1,331 @@
-# Primordial Galaxy
+# 🛡️ GovTech Hunter — Primordial Galaxy
 
-> Production-grade government contract intelligence and Red Team simulation platform.
-> Discovers RFPs, scores strategic fit, simulates attacker ROI, and generates defensive legal clauses ("Antibodies") that make AI-enabled procurement fraud economically unviable.
+> **Government contract intelligence + red team simulation system.**  
+> Scrapes public procurement sources → scores opportunities → generates adversarial threat assessments → drafts legally-grounded antibody clauses. Domain specialization layer of the R.O.N.I.N. / JARVIS stack.
+
+[![Version](https://img.shields.io/badge/version-0.6-blue)]()
+[![License](https://img.shields.io/badge/license-PolyForm%20Shield%201.0-blue)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
+[![Audit](https://img.shields.io/badge/audit-3--round%20PASS--CLEAN-brightgreen)]()
+[![Status](https://img.shields.io/badge/status-production--ready-brightgreen)]()
+[![Sovereign](https://img.shields.io/badge/infra-sovereign--local-orange)]()
+[![Air Gap](https://img.shields.io/badge/deployment-air--gap%20ready-orange)]()
+[![GovTech](https://img.shields.io/badge/domain-GovTech%20%7C%20Defense-darkblue)]()
 
 ---
 
-## Core Philosophy
+## What This Is
 
-**Security through Saturation** — rather than hiding vulnerabilities, this system surfaces them, models attacker economics, and generates protective RFP clauses that raise the cost of fraud above the value of the contract. See [directives/saturation_philosophy.md](directives/saturation_philosophy.md) for the full framework.
+GovTech Hunter is a production-grade, multi-stage AI pipeline that monitors U.S. government and California district procurement streams, scores each opportunity for fit and win probability, runs an adversarial red team simulation against every high-value target, and drafts legally-grounded contract defense clauses — anchored to a local FAR/DFARS/CMMC legal corpus with semantic FAISS retrieval.
+
+> **Open-core:** the public repository ships the full pipeline plus a **runnable sample corpus**. The complete curated clause set, the validated "antibody" clause library, and the fraud→shield linkage are a **private, commercial layer** — see [License](#license).
+
+It runs unattended at 07:00 daily. It records every run to a local SQLite Observatory. It exposes a live FastAPI dashboard. It does not require cloud infrastructure.
+
+**This is not a scraping tool. This is not a POC.** This is 16 sessions of production engineering across 4+ months — v0.6, validated by a three-round AI audit (PASS-CLEAN, zero open findings of MEDIUM or higher severity).
 
 ---
 
-## Architecture
+## The Problem
 
-The stack is **sovereign-local**. All LLM inference runs through a local-primary
-cascade — no cloud AI dependency, no GCP, no Vertex, no Gemini.
+Fraud drains an estimated **$233–$521 billion from the U.S. federal government every year** — the first government-wide estimate of its kind ([GAO-24-105833](https://www.gao.gov/products/gao-24-105833), April 2024, based on FY2018–2022 data). Procurement is one of the largest exposure surfaces.
+
+Defenders writing contract responses have no adversarial simulation layer — they don't know what attack vectors exist against their own bids until they lose or get audited. Existing tools score opportunities. None of them red-team your position and draft legally-cited defensive clauses before you submit.
+
+GovTech Hunter does all three in a single unattended pipeline run.
+
+---
+
+## Pipeline
 
 ```
-LLM cascade (execution/llm_client.py)
-  1. Local LM Studio   (Qwen3-8b on RAZZOR-FACCE, free/instant, OpenAI-compatible)
-  2. Venice AI         (paid credits, OpenAI-compatible)
-  3. Anthropic API     (claude-sonnet-4-6, direct SDK)
-  → set LLM_MODE in .env to pin a tier; default is the full auto cascade.
-
-Retrieval: local nomic-embed FAISS over the legal corpus (no cloud vector search).
-
-Layer 1 — Directives (directives/)   strategy, SOPs, philosophy (mostly ARCHIVED)
-Layer 2 — Orchestration (execution/orchestrator.py)   retry, timeout, threading
-Layer 3 — Execution (execution/)   Acquisition → Analysis → Red Team → Publication
-```
-
-> **History note:** Earlier eras of this project ran on Hetzner + GCP (Vertex AI /
-> Discovery Engine / Gemini). All of that was torn down 2026-06-06. Any document
-> still describing that infrastructure as live is archived under `_ARCHIVE/` or
-> `directives/` and is **historical only**. Ground truth is `STATE.md` + `CLAUDE.md`.
-
----
-
-## System Components
-
-| Module | Purpose | Entry Point |
-|--------|---------|-------------|
-| `execution/main.py` | Full pipeline orchestration | `python execution/main.py` |
-| `execution/orchestrator.py` | Retry/timeout wrapper for all modules | `Orchestrator.run_module()` |
-| `execution/llm_client.py` | Local→Venice→Anthropic LLM cascade | `complete(prompt, mode=...)` |
-| `execution/scraper_csda.py` | CSDA Honey Pot (Playwright, CA special districts) | `fetch_csda_opportunities()` |
-| `execution/scraper_sam.py` | SAM.gov federal contracts API | `fetch_federal_opportunities()` |
-| `execution/grant_hunter.py` | NSF SBIR/STTR grant discovery | `fetch_grant_opportunities()` |
-| `execution/discovery_engine.py` | **RETIRED** stub (was Vertex AI Search) | no-op, returns `[]` |
-| `execution/hunter_brain.py` | PDF download + keyword scoring + win probability | `analyze_opportunity(opp)` |
-| `execution/gemini_analyst.py` | Dual-track RFP analysis (white-hat + red-team + antibody). **Name is legacy** — body uses the cascade, no Gemini | `analyze_rfp(text)` |
-| `execution/antibody_agent.py` | FAISS corpus retrieval + grounded antibody drafting + specificity rubric | `generate(opp, assessment)` |
-| `execution/red_team_simulation.py` | Red team threat profiling + ROI inversion (via cascade) | `python execution/red_team_simulation.py` |
-| `execution/aaas_poc.py` | PII anonymization for publication (AaaS, via cascade) | `create_anonymized_intelligence(finding)` |
-| `execution/health_check.py` | System diagnostics (5 nodes) | `python execution/health_check.py` |
-| `execution/shared_utils.py` | Prompt injection sanitizer, safe ROI calculator | `antibody_prompt_sanitizer_v1()`, `calculate_roi_safe()` |
-
----
-
-## Data Flow (Start to Finish)
-
-```
-Phase 0: Pre-Flight
-  health_check.py → 5 nodes: Anthropic API, SAM.gov, CSDA, Local Corpus, Local Embedder
-                  → [PASS] / [WARN] / [CRITICAL] per node
-                    (Local Corpus is the only critical node; the rest degrade gracefully)
-
-Phase 1: Acquisition (parallel threads via orchestrator.py, 30s timeout each)
-  scraper_csda.py  → CA special district RFPs (Playwright)
-  scraper_sam.py   → Federal contracts (SAM.gov REST API)
-  grant_hunter.py  → NSF SBIR/STTR grants
-  (discovery_engine.py is retired — returns no results)
-  └→ Consolidated opportunity set
-
-Phase 2: Intelligence Analysis (per opportunity)
-  hunter_brain.py    → PDF download + keyword scoring → win_probability, fit_label
-  gemini_analyst.py  → Dual-track analysis via the LLM cascade:
-    Part 1 (White Hat): strategic fit, remote_friendly, estimated_value
-    Part 2 (Black Hat): vulnerability_score, primary_vector, exploit_scenario
-    Part 3 (Antibody):  legally-binding clause to prevent the identified fraud vector
-  shared_utils.py    → sanitize inputs, calculate safe ROI
-  └→ Output: opportunities.json
-
-Phase 3: Red Team Simulation (standalone, human-gated)
-  red_team_simulation.py → for each opportunity:
-    - parse actual contract value (estimated_value or 'value' field)
-    - simulate attacker ROI (payout / 2% cost floor)
-    - identify fraud vectors: outsourcing, phishing, billing abuse
-    - draft antibody via antibody_agent (FAISS-grounded, specificity-scored)
-    - MANDATORY HUMAN GATE: confirm before saving
-  └→ Output: threat_assessment.json + data/procurement_shield.json
-
-Phase 4: Publication (optional)
-  aaas_poc.py → cascade-powered PII scrub (names, emails, budgets, systems)
-  └→ Output: data/aaas_intelligence_brief.md (portfolio/whitepaper-safe)
+┌─────────────────────────────────────────────────────────────────────┐
+│                    GOVTECH HUNTER v0.6                             │
+│               "CSDA Honey Pot Active"                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  PHASE 1 — ACQUISITION                                             │
+│  ┌──────────────────┐  ┌────────────────┐  ┌───────────────────┐  │
+│  │  CSDA            │  │  SAM.gov       │  │  Grant Hunter     │  │
+│  │  "Honey Pot"     │  │  "The Whale"   │  │  "Foundations"    │  │
+│  │  California      │  │  Federal       │  │  grants.gov       │  │
+│  │  Districts       │  │  Opportunities │  │  sbir.gov         │  │
+│  │  (Playwright)    │  │  (API)         │  │  + browser portals│  │
+│  └────────┬─────────┘  └───────┬────────┘  └─────────┬─────────┘  │
+│           └───────────────────┬┘───────────────────── ┘            │
+│                               ▼                                     │
+│  PHASE 2 — ANALYSIS (hunter_brain.py)                              │
+│  ┌────────────────────────────────────────────────────────────┐    │
+│  │  Opportunity Scorer    │  win_probability, fit_label       │    │
+│  │  Red Team Simulation   │  primary_vector, vuln_score /100  │    │
+│  │  Antibody Agent        │  FAISS → LLM draft → specificity  │    │
+│  │                        │  gate (≥75) → procurement_shield  │    │
+│  └────────────────────────────────────────────────────────────┘    │
+│                               ▼                                     │
+│  PHASE 3 — REPORTING                                               │
+│  ┌────────────────────────────────────────────────────────────┐    │
+│  │  opportunities.json (atomic write, fsync)                  │    │
+│  │  procurement_shield.json (cumulative antibody clauses)     │    │
+│  │  HIGH priority target summary → stdout                     │    │
+│  └────────────────────────────────────────────────────────────┘    │
+│                               ▼                                     │
+│  PHASE 4 — OBSERVATORY (non-fatal, never blocks acquisition)       │
+│  ┌────────────────────────────────────────────────────────────┐    │
+│  │  SQLite spine → data/primordial.db                         │    │
+│  │  FastAPI dashboard → :8787 (run_dashboard.ps1)             │    │
+│  │  Surfaces: LLM tier served, source counts, errors          │    │
+│  └────────────────────────────────────────────────────────────┘    │
+│                                                                     │
+│  ⚙  GovTechHunterDaily — Windows Task Scheduler, 07:00 daily      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Prerequisites
+## LLM Cascade Architecture
 
-- Python 3.12+
-- [Playwright](https://playwright.dev/python/) with Chromium: `python -m playwright install --with-deps chromium`
-- **LM Studio** running locally (Qwen3-8b, OpenAI-compatible endpoint) for the free primary tier — optional; the cascade falls back to Venice/Anthropic if it is down
-- **Venice AI** API key (optional fallback tier)
-- **Anthropic** API key (final fallback tier, `claude-sonnet-4-6`)
-- **SAM.gov** API key
+```
+llm_client.complete(prompt, mode="fast"|"precise")
 
-**`.env` file:**
-```env
-# LLM cascade (set LLM_MODE=auto for full fallback, or local|venice|anthropic to pin)
-LLM_MODE=auto
-LOCAL_LLM_BASE_URL=http://localhost:1234/v1
-VENICE_API_KEY=your_venice_key
-ANTHROPIC_API_KEY=your_anthropic_key
-# Data sources
-SAM_API_KEY=your_sam_gov_key
+  1. Local LM Studio  ──→  OpenAI-compatible endpoint (localhost:1234)
+                           TCP availability check before dispatch
+                           mode=fast    → LOCAL_MODEL_FAST  (env-configurable)
+                           mode=precise → LOCAL_MODEL_PRECISE (env-configurable)
+
+  2. Venice AI        ──→  OpenAI-compatible (api.venice.ai)
+                           llama-3.3-70b (fast + precise)
+                           Paid credits, sovereign inference
+
+  3. Anthropic API    ──→  Direct SDK, claude-sonnet-4-6
+                           Final fallback / precision drafting floor
+
+  get_last_provider() → Observatory surfaces which tier served each run.
+  LLM_MODE=auto|local|venice|anthropic (env override)
 ```
 
-There is **no** GCP project, service-account key, or Gemini key required. If you
-find `gcp-key.json`, `GOOGLE_CLOUD_PROJECT`, or `GEMINI_API_KEY` referenced
-anywhere, it is legacy — see `_ARCHIVE/` and `execution/_archive_vertex/`.
+Zero `google.generativeai`, `google.cloud.aiplatform`, or `vertexai` calls anywhere in the active codebase. All LLM calls route through `execution/llm_client.py`. GCP was fully deleted 2026-06-06.
 
 ---
 
-## Local Setup
+## Legal Corpus & Antibody System
+
+**Corpus (open-core):** the public repo ships a **runnable sample** of the FAR/DFARS/CMMC clause set so the pipeline works out of the box. The **full curated corpus** — 104 clauses across FAR (incl. 52.240-93), DFARS, CMMC/cyber, data-rights, GSAR, small-business, IT/cloud, and California state clauses — plus the **validated antibody library** are the private, commercial layer. (Raw FAR/DFARS text is public-domain; the value is the curation, grounding, and validated drafts.)
+
+**Retrieval:** Semantic search via local `nomic-embed-text-v1.5` (768d) FAISS index. Lexical keyword fallback for offline/air-gap operation.
+
+**Antibody Pipeline:**
+```
+Opportunity + Threat Assessment
+  → semantic FAISS retrieval (legal_corpus.faiss)
+  → LLM clause drafter (cascade, mode="precise")
+  → grounding gate: cited far_reference must match a retrieved clause_id
+  → specificity rubric ≥75 (cadence / quantity / actor / enforcement teeth)
+  → economic calibration
+  → procurement_shield.json (cumulative, append-mode)
+
+Status: VALIDATED | NEEDS_REVIEW | FAILED_GROUNDING
+```
+
+---
+
+## Observatory
+
+Built in v16 (2026-06-16). Verified auto-recording unattended.
+
+| Module | Role |
+|--------|------|
+| `observatory/db.py` | SQLite spine — `data/primordial.db` (runs / opportunities / corpus_docs) |
+| `observatory/recorder.py` | Non-fatal run recorder hook — never takes down acquisition |
+| `observatory/server.py` | FastAPI live dashboard on :8787 |
+| `observatory/embed_corpus.py` | Corpus FAISS embedding |
+| `observatory/ingest.py` | govinfo.gov ingest — EOs via Federal Register API (current to EO 14411), GAO via govinfo collections |
+| `observatory/backfill.py` | Backfill historical runs |
+| `observatory/fulltext.py` | Full-text corpus search |
+
+74 govinfo documents seeded in v16. Surfaces which LLM tier served — caught local tier down for 3 days.
+
+---
+
+## Module Map
+
+| Module | Role |
+|--------|------|
+| `execution/main.py` | Entry point — 4-phase pipeline |
+| `execution/orchestrator.py` | Pipeline coordinator, error collection, graceful degradation |
+| `execution/llm_client.py` | Unified LLM cascade (local → Venice → Anthropic) |
+| `execution/hunter_eyes.py` | Opportunity aggregator |
+| `execution/hunter_brain.py` | Opportunity scorer + red team trigger |
+| `execution/antibody_agent.py` | Semantic FAISS retrieval → clause drafting → specificity gate |
+| `execution/red_team_simulation.py` | Adversarial threat generation → `procurement_shield.json` |
+| `execution/scraper_sam.py` | SAM.gov API scraper |
+| `execution/scraper_csda.py` | CSDA Playwright scraper |
+| `execution/scraper_grants_api.py` | grants.gov + sbir.gov API |
+| `execution/scraper_grants_browser.py` | Browser-based grant portal scraper |
+| `execution/grant_hunter.py` | 4-source grant intelligence pipeline |
+| `execution/doc_fetcher.py` | RFP document pull from posting pages (login-wall aware) |
+| `execution/gemini_analyst.py` | Opportunity scoring via cascade (name legacy — no Gemini/Vertex) |
+| `execution/health_check.py` | Pre-flight checks (aborts pipeline on critical failure) |
+| `execution/compliance/disclosure_template.py` | M-26-04 stamp_disclosure() — OMB AI policy compliance |
+| `execution/shared_utils.py` | antibody_prompt_sanitizer_v1, calculate_roi_safe |
+| `execution/seed_legal_corpus.py` | Legal corpus seeding + FAISS indexing |
+| `execution/discovery_engine.py` | ⚠ RETIRED — Vertex AI Search stub (datastore deleted 2026-06-06) |
+| `execution/aaas_poc.py` | Publication/API layer — not a pipeline step |
+
+---
+
+## Compliance
+
+- **M-26-04 (OMB AI Policy):** `compliance/disclosure_template.py:stamp_disclosure()` — 4-element stamp applied to all submission artifacts
+- **EO 14179:** "Removing Barriers to American Leadership in AI" — primary source URL inline per codebase principle
+- **FAR/DFARS citations:** Every regulatory citation in active code carries primary-source URL on the same logical block. No bare citation without attribution.
+- **GSAR 552.239-7001:** Correctly flagged as PROPOSED rule (not yet binding as of June 2026)
+
+---
+
+## Infrastructure
+
+| Component | Status |
+|-----------|--------|
+| Hetzner CPX32 | DEAD — shutdown 2026-04-06 |
+| GCP (all 5 projects) | DELETED — torn down 2026-06-06 |
+| Anthropic API | LIVE — claude-sonnet-4-6 direct SDK |
+| Venice AI | LIVE — llama-3.3-70b |
+| Local LM Studio | Configurable — env-driven model selection |
+| Legal Corpus (FAISS) | ON DISK — local sovereign (sample public / full set private) |
+| Observatory (SQLite) | LIVE — data/primordial.db, auto-recording |
+| GovTechHunterDaily | SCHEDULED — 07:00 Windows Task Scheduler |
+
+**Sovereign-local stack.** No cloud dependency in the current architecture. Cloud infrastructure will be rebuilt when a FedRAMP customer, volume threshold, or collaborator trigger is met.
+
+---
+
+## Audit Record
+
+This codebase underwent a three-round AI audit in June 2026:
+
+| Round | Findings | Status |
+|-------|----------|--------|
+| Round 1 | 43 findings | Fixed in round 2 |
+| Round 2 | 5 new + 2 partials | Fixed in round 3 |
+| Round 3 | 0 new | **PASS-CLEAN** |
+
+Zero open findings of MEDIUM or higher severity at public release. The round-by-round commit trail is preserved in the published history; detailed findings reports are retained in the private engineering record.
+
+---
+
+## Tech Stack
+
+```
+Language:          Python 3.12
+Web Scraping:      Playwright (Chromium), requests, BeautifulSoup4
+AI Inference:      Anthropic SDK, OpenAI SDK (Venice + LM Studio compat.)
+Vector Search:     FAISS (faiss-cpu), nomic-embed-text-v1.5 (768d)
+Document Parsing:  pypdf, doc_fetcher (login-wall aware)
+API Layer:         FastAPI + uvicorn (Observatory dashboard)
+Data:              SQLite (Observatory), JSON (corpus, opportunities, shield)
+Task Scheduling:   Windows Task Scheduler (GovTechHunterDaily)
+```
+
+---
+
+## Companion Repositories
+
+| Repo | Description |
+|------|-------------|
+| [`Rise-Of-The-Prompt-Kiddie`](https://github.com/apex-ronin/Rise-Of-The-Prompt-Kiddie) | 40-page technical whitepaper v2.1 — AI-enabled threat actors in GovTech (CC BY 4.0) — **public** |
+
+> Additional components — the curated legal corpus, the vendor entity index, sovereign data pipeline infrastructure, and the R.O.N.I.N. / JARVIS core stack — are part of the **private commercial layer** and are not publicly available.
+
+---
+
+## Getting Started
 
 ```bash
-git clone <repo>
+git clone https://github.com/apex-ronin/primordial-galaxy.git
 cd primordial-galaxy
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-python -m playwright install --with-deps chromium
-cp .env.example .env   # then fill in keys
+cp .env.example .env
+# Fill in: ANTHROPIC_API_KEY, VENICE_API_KEY, SAM_API_KEY
+# Optional: LOCAL_LLM_BASE_URL, LLM_MODE, LOCAL_MODEL_FAST, LOCAL_MODEL_PRECISE
+
+# Run the full pipeline
+powershell .\run_scanner.ps1
+
+# Launch the Observatory dashboard (localhost:8787)
+powershell .\run_dashboard.ps1
+
+# Register as a persistent boot service
+powershell .\register_boot_task.ps1
+
+# Air-gap / local LLM mode
+powershell .\start_local_llm.ps1
 ```
 
 ---
 
-## How to Run
+## Co-Authorship
 
-### 1. Health Check (verify all nodes)
-```bash
-python execution/health_check.py
-```
-Checks 5 nodes: Anthropic API, SAM.gov, CSDA Honey Pot, Local Corpus (critical), Local Embedder (nomic via LM Studio).
+This system was designed and built in active collaboration between **Jay Nelson (Dopamine Ronin)** and **Claude (Anthropic)** across 16 sessions from February to June 2026 — architecture decisions, module design, audit passes, and production hardening done together.
 
-### 2. Full Saturation Pipeline
-```bash
-python execution/main.py
-```
-Output: `opportunities.json` — scored and analyzed RFPs from all sources.
+The commit history is the methodology section. The audit rounds are the results. The shipped pipeline is the conclusion.
 
-### 3. Red Team Simulation (run after main.py)
-```bash
-python execution/red_team_simulation.py
 ```
-Requires `opportunities.json`. Human gate confirmation required before saving.
-Output: `threat_assessment.json`, appends antibodies to `data/procurement_shield.json`.
+Co-authored-by: Claude (Anthropic) <noreply@anthropic.com>
+```
 
-### 4. Anonymize for Publication
-```bash
-python execution/aaas_poc.py
-```
-Output: `data/aaas_intelligence_brief.md` — PII-scrubbed intelligence brief.
+A companion whitepaper on this human-AI co-architecture model is in development. The thesis: AI as genuine co-architect — not autocomplete — producing GovTech-audited, production-grade infrastructure. Documented in commits, verifiable in audit trails, live in production.
 
 ---
 
-## Scheduling
+## Ethics & Use Policy
 
-The daily scan runs locally via Windows Task Scheduler task **`GovTechHunterDaily`**,
-which invokes `run_scanner.ps1` from this repo on `G:\`. No cloud node or always-on
-server is involved.
+GovTech Hunter is a **fraud detection and contract defense tool.**
 
----
+- `red_team_simulation.py` stress-tests **your own position** against known procurement fraud TTPs — adversarial validation, not facilitation
+- Designed for **contracting officers, compliance teams, prime contractors, inspectors general, and authorized security researchers**
+- Misuse to circumvent procurement regulations, mask fraudulent activity, or evade detection is a federal crime and explicitly prohibited
 
-## Output Files
-
-| File | Created By | Contents |
-|------|-----------|---------|
-| `opportunities.json` | `main.py` | Scored RFPs with win_probability, fit_label, red_team findings |
-| `threat_assessment.json` | `red_team_simulation.py` | Threat profiles with vulnerability_score, vector, roi_index, immune_system_antibody |
-| `data/procurement_shield.json` | `red_team_simulation.py` | Cumulative antibody clauses from all red team runs |
-| `data/aaas_intelligence_brief.md` | `aaas_poc.py` | PII-scrubbed case study (publication-safe) |
-| `logs/error_patterns.json` | `orchestrator.py` | Last 100 API errors for pattern analysis |
-
-(Runtime JSON outputs and `data/` are gitignored — never committed.)
+If you found this repo to evade detection: wrong tool.
 
 ---
 
-## Regulatory Grounding
+## Project Timeline
 
-Antibody clauses and disclosures cite primary sources only (per `CLAUDE.md`
-Principle 3). Current key citations: **OMB M-26-04** (implements **EO 14319**),
-**FAR 52.240-93** (formerly 52.204-21, renumbered Feb 2026), and the renumbered
-**DFARS 252.204-7020/7021** series. Every regulatory citation in code carries a
-primary-source URL comment.
+| Phase | Period | Status |
+|-------|--------|--------|
+| POC — 47-hour sprint, live results | Feb 2026 | ✅ Complete |
+| Production build — 16 sessions, v0.6 | Feb–Jun 2026 | ✅ Complete |
+| Three-round AI audit (PASS-CLEAN) | Jun 2026 | ✅ Complete |
+| Whitepaper v2.1 published | Jun 4, 2026 | ✅ Live |
+| Observatory built + verified unattended | Jun 16, 2026 | ✅ Live |
+| Air Force Tech Connect submission | In progress | 🔄 |
+| Public release | Jun 2026 | 🟢 Now |
 
 ---
 
-## Roadmap & Open Items
+## Who Built This
 
-See [primordial_galaxy_roadmap.md](primordial_galaxy_roadmap.md) for the current session log and open items.
+**[Dopamine Ronin](https://github.com/apex-ronin)** — AI infrastructure engineering for complex, high-stakes systems that other developers avoid or fail to complete.
+
+20+ years of cross-domain expertise in automotive diagnostics, construction systems, and technical operations — where broken ships don't get excused. That standard applies here.
+
+Core capabilities:
+- GovTech fraud detection & procurement compliance intelligence
+- Multi-agent AI automation with sovereign-local LLM architecture
+- Anti-detection web intelligence and data pipeline engineering
+- Security red teaming and adversarial AI research
+- Air-gap and classified environment deployment readiness
+
+---
+
+## License
+
+**PolyForm Shield 1.0.0** — source-available. You may read, run, modify, and self-host the software for any purpose **except** building a product that competes with it. See [LICENSE](LICENSE).
+
+The public repository ships a **sample corpus** only; the full curated legal corpus and the validated antibody library are a private, commercial layer.
+
+Whitepaper: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+
+---
+
+*Built to the standard government infrastructure demands: production-only, three-round audited, sovereign-local, no shortcuts.*
