@@ -43,6 +43,9 @@ jobs:
           restore-keys: |
             primordial-data-
 
+      - name: Prepare runtime dirs (git does not track empty dirs)
+        run: mkdir -p execution/logs execution/pdf_cache logs data
+
       - name: Run scanner pipeline
         working-directory: execution
         env:
