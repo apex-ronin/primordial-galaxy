@@ -1,0 +1,76 @@
+name: GovTech Hunter - Daily Scanner (cloud failover)
+
+# Runs ONLY in the PRIVATE ops mirror (jsnnlsn-prog/primordial-galaxy).
+# Do NOT commit this file to the public apex-ronin repo: artifacts on public
+# repos are world-downloadable and would expose run outputs.
+#
+# Cloud failover for run_scanner.ps1 + the Windows GovTechHunterDaily task.
+# The local rig hard-crashes under sustained load and the office is gone, so
+# this guarantees the 07:00 PT scan fires regardless of the box. No local
+# LM Studio on runners: the cascade in execution/llm_client.py fails the 1s
+# local TCP probe and serves via Venice, then Anthropic. Degraded vs local:
+# no semantic embedder on runner -> antibody uses keyword fallback over the
+# repo corpus. Acceptable for failover; the box remains the primary tier.
+
+on:
+  schedule:
+    - cron: '0 14 * * *'   # 14:00 UTC ~= 07:00 America/Los_Angeles
+  workflow_dispatch: {}     # manual trigger for testing / catch-up runs
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright browser (CSDA scraper)
+        run: playwright install --with-deps chromium
+
+      - name: Restore cumulative data/ state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/primordial.db
+          key: primordial-data-${{ github.run_id }}
+          restore-keys: |
+            primordial-data-
+
+      - name: Run scanner pipeline
+        working-directory: execution
+        env:
+          # Secret names below match what exists in repo settings.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          VENICE_API_KEY: ${{ secrets.VENICE_API }}
+          SAM_API_KEY: ${{ secrets.SAM_GOV_API }}
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: python main.py
+
+      - name: Save cumulative data/ state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/primordial.db
+          key: primordial-data-${{ github.run_id }}
+
+      # PRIVATE repo only. procurement_shield.json (earned antibody clauses)
+      # is included because this mirror is private; never enable this upload
+      # on a public repo.
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results-${{ github.run_id }}
+          path: |
+            execution/opportunities.json
+            data/procurement_shield.json
+          retention-days: 30
+          if-no-files-found: warn
