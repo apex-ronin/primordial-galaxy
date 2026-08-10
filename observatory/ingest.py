@@ -211,6 +211,98 @@ def fetch_title48(vol: int = 2, section: str = "sec52", source: str = "far",
 
 
 # ---------------------------------------------------------------------------
+# FAR (RFO-current)  (acquisition.gov FARHTML.zip -- the living post-overhaul text)
+# ---------------------------------------------------------------------------
+
+RFO_ZIP_URL = "https://www.acquisition.gov/sites/default/files/current/far/zip/html/FARHTML.zip"
+
+
+def _html_to_text(html: str) -> str:
+    """Strip HTML to plain text. bs4 if available (in requirements), regex fallback."""
+    try:
+        from bs4 import BeautifulSoup
+        return BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+    except ImportError:
+        import re
+        txt = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+        txt = re.sub(r"(?s)<[^>]+>", " ", txt)
+        return re.sub(r"\s+", " ", txt).strip()
+
+
+def fetch_far_rfo(parts: str | None = "52", limit: int | None = None) -> list[dict]:
+    """Current FAR sections from acquisition.gov's published HTML zip.
+
+    WHY (2026-08-05): the CFR Title 48 path above serves the 2024 annual
+    edition -- pre-Revolutionary-FAR-Overhaul (RFO, effective 2026-04-17), so
+    its clause numbering is stale (e.g. 52.204-21 -> 52.240-93). acquisition.gov
+    is the RFO-current living text and ships the whole FAR as one zip of
+    per-section HTML files: no scraping, no rate limits, full text at ingest
+    time (no separate fulltext pass needed).
+
+    `parts`: comma-separated FAR part numbers ("3,9,15,19,52") or "all".
+    Docs land as source='far_rfo' -- distinct from the CFR-edition 'far' docs,
+    so both eras stay citable and the retrieval blend sees the current text.
+    """
+    import io
+    import re
+    import zipfile
+
+    req = urllib.request.Request(RFO_ZIP_URL, headers=_UA)
+    with urllib.request.urlopen(req, timeout=180) as resp:
+        blob = resp.read()
+    zf = zipfile.ZipFile(io.BytesIO(blob))
+
+    wanted = None
+    if parts and parts.lower() != "all":
+        wanted = {p.strip() for p in parts.split(",") if p.strip()}
+
+    # Section files look like '52.240-93.html' / '3.104-3.html'; part landing
+    # pages like 'Part_52.html' (naming probed live 2026-08-05; regexes are
+    # tolerant of case/underscore/dash variants).
+    sec_re = re.compile(r"(?:^|/)(\d{1,2})\.(\d[\w.-]*?)\.html?$", re.I)
+    part_re = re.compile(r"(?:^|/)part[_ -]?(\d{1,2})\.html?$", re.I)
+
+    fetched_at = datetime.now().isoformat()
+    accessed = fetched_at[:10]
+    docs = []
+    for name in sorted(zf.namelist()):
+        sm, pm = sec_re.search(name), part_re.search(name)
+        if sm:
+            part, rest = sm.group(1), sm.group(2)
+            citation = f"FAR {part}.{rest}"
+            url = f"https://www.acquisition.gov/far/{part}.{rest}"
+        elif pm:
+            part = pm.group(1)
+            citation = f"FAR Part {part}"
+            url = f"https://www.acquisition.gov/far/part-{part}"
+        else:
+            continue
+        if wanted and part not in wanted:
+            continue
+        html = zf.read(name).decode("utf-8", "replace")
+        text = _html_to_text(html)
+        if len(text) < 200:  # nav stubs / empty shells -- skip
+            continue
+        t = re.search(r"(?is)<title>(.*?)</title>", html)
+        title = (t.group(1).strip() if t else citation)[:200]
+        docs.append({
+            "source": "far_rfo",
+            "collection": "RFO",
+            "citation": citation,
+            "title": title,
+            "url": url,
+            "published": f"RFO-current (accessed {accessed})",
+            "fetched_at": fetched_at,
+            "text": text,
+            "embedded": 0,
+            "meta_json": json.dumps({"zip_member": name, "zip_url": RFO_ZIP_URL}),
+        })
+        if limit and len(docs) >= limit:
+            break
+    return docs
+
+
+# ---------------------------------------------------------------------------
 # persistence
 # ---------------------------------------------------------------------------
 
@@ -246,6 +338,11 @@ def main() -> None:
     p_far.add_argument("--year", type=int, default=None, help="CFR edition year (default: newest available)")
     p_far.add_argument("--limit", type=int, default=None)
 
+    p_rfo = sub.add_parser("rfo", help="RFO-current FAR sections (acquisition.gov FARHTML.zip)")
+    p_rfo.add_argument("--parts", default="52",
+                       help='comma-separated FAR parts, e.g. "3,9,15,19,52", or "all"')
+    p_rfo.add_argument("--limit", type=int, default=None)
+
     args = ap.parse_args()
     if args.cmd == "eo":
         docs = fetch_executive_orders(args.limit)
@@ -253,6 +350,8 @@ def main() -> None:
         docs = fetch_gao_reports(args.start, args.end)
     elif args.cmd == "far":
         docs = fetch_title48(args.vol, args.section, args.source, args.year, args.limit)
+    elif args.cmd == "rfo":
+        docs = fetch_far_rfo(args.parts, args.limit)
     else:  # pragma: no cover
         ap.error("unknown command")
 
