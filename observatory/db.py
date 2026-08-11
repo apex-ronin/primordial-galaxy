@@ -3,13 +3,22 @@
 One file, no server, no cloud. Lives at <repo>/data/primordial.db (gitignored as
 runtime data — it is fully regenerable from opportunities.json + scan logs).
 
-Three tables:
-  runs          — one row per scanner run: when, how long, status, per-source
-                  counts, which LLM tier actually served, errors, log path.
-  opportunities — deduped by link; carries the full scored record plus
-                  first_seen / last_seen so the dashboard can show history/trend.
-  corpus_docs   — the knowledge store the ORACLE agents draw on (govinfo, FAR,
-                  DFARS, EOs, GAO/IG fraud cases). Deduped by (source, citation).
+Four tables:
+  runs               — one row per scanner run: when, how long, status,
+                       per-source counts, which LLM tier actually served,
+                       errors, log path.
+  opportunities      — deduped by link; carries the full scored record plus
+                       first_seen / last_seen so the dashboard can show
+                       history/trend.
+  corpus_docs        — the knowledge store the ORACLE agents draw on (govinfo,
+                       FAR, DFARS, EOs, GAO/IG fraud cases). Deduped by
+                       (source, citation).
+  entity_procurement — Arc #6 Heartland Phase 1: one row per Census-of-
+                       Governments entity (principalities-index, 78,291
+                       units). Tracks whether its website is live, whether a
+                       procurement/bids page was located, and which shared
+                       portal platform (if any) it runs on. Deduped by
+                       entity_id (the Census GIDID).
 """
 
 from __future__ import annotations
@@ -85,10 +94,37 @@ CREATE TABLE IF NOT EXISTS corpus_docs (
     UNIQUE(source, citation)
 );
 
+CREATE TABLE IF NOT EXISTS entity_procurement (
+    entity_id               TEXT PRIMARY KEY,  -- Census GIDID, e.g. "1100100100000"
+    name                    TEXT,
+    state_code              TEXT,
+    government_type         TEXT,   -- Census type code + label, e.g. "1 - COUNTY"
+    county                  TEXT,
+    population              INTEGER,
+    website                 TEXT,   -- input: contact_skeleton.web_address from principalities-index
+    website_live            INTEGER,-- 0 | 1 | NULL(not yet checked)
+    website_status_code     INTEGER,
+    procurement_url         TEXT,   -- discovered bids/RFP/procurement page, if any
+    procurement_confidence  TEXT,   -- domain_signature | keyword_match | NULL
+    portal_platform         TEXT,   -- bidnet_direct | bonfire | opengov_procurenow | demandstar |
+                                    -- publicpurchase | questcdn | ionwave | periscope_bidsync |
+                                    -- cit_e | custom_html | none | unknown
+    verify_status           TEXT,   -- pending | verified | no_website | site_down | no_procurement_found | error
+    verify_attempts         INTEGER DEFAULT 0,
+    error_detail            TEXT,
+    first_seen              TEXT,
+    last_seen               TEXT,
+    last_verified_at        TEXT,
+    meta_json               TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_opp_win   ON opportunities(win_probability DESC);
 CREATE INDEX IF NOT EXISTS idx_opp_run   ON opportunities(last_run_id);
 CREATE INDEX IF NOT EXISTS idx_runs_time ON runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_corpus_src ON corpus_docs(source);
+CREATE INDEX IF NOT EXISTS idx_entproc_state  ON entity_procurement(state_code);
+CREATE INDEX IF NOT EXISTS idx_entproc_status ON entity_procurement(verify_status);
+CREATE INDEX IF NOT EXISTS idx_entproc_portal ON entity_procurement(portal_platform);
 """
 
 
@@ -208,6 +244,87 @@ def upsert_corpus_doc(conn: sqlite3.Connection, doc: dict) -> None:
     )
 
 
+def seed_entity(conn: sqlite3.Connection, entity: dict, seen_at: str) -> None:
+    """Insert or refresh an entity_procurement row from principalities-index source data.
+
+    Only the Census-sourced descriptive fields are touched here (name, state,
+    government_type, county, population, website, last_seen). Verification
+    fields (website_live, procurement_url, portal_platform, verify_status,
+    ...) are left alone if the row already exists -- seeding must never
+    clobber work the verifier job already did. first_seen/verify_status are
+    set only on first insert.
+    """
+    cols = ["entity_id", "name", "state_code", "government_type", "county",
+            "population", "website", "first_seen", "last_seen", "verify_status"]
+    row = {
+        "entity_id": entity["entity_id"],
+        "name": entity.get("name"),
+        "state_code": entity.get("state_code"),
+        "government_type": entity.get("government_type"),
+        "county": entity.get("county"),
+        "population": entity.get("population"),
+        "website": entity.get("website"),
+        "first_seen": seen_at,
+        "last_seen": seen_at,
+        "verify_status": "pending",
+    }
+    update_cols = ["name", "state_code", "government_type", "county",
+                   "population", "website", "last_seen"]
+    set_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+    placeholders = ", ".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO entity_procurement ({', '.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(entity_id) DO UPDATE SET {set_clause}",
+        [row[c] for c in cols],
+    )
+
+
+def record_verification(conn: sqlite3.Connection, entity_id: str, result: dict, checked_at: str) -> None:
+    """Write verifier-job results for one entity_procurement row. Row must already exist (seed_entity first)."""
+    cols = ["website_live", "website_status_code", "procurement_url",
+            "procurement_confidence", "portal_platform", "verify_status",
+            "error_detail", "meta_json"]
+    set_clause = ", ".join(f"{c} = ?" for c in cols)
+    conn.execute(
+        f"UPDATE entity_procurement SET {set_clause}, "
+        f"verify_attempts = verify_attempts + 1, last_verified_at = ?, last_seen = ? "
+        f"WHERE entity_id = ?",
+        [result.get(c) for c in cols] + [checked_at, checked_at, entity_id],
+    )
+
+
+def pending_entities(conn: sqlite3.Connection, state_code: str | None = None,
+                     limit: int | None = None) -> list[sqlite3.Row]:
+    """Rows still needing a verifier pass (verify_status='pending'), oldest-seeded first."""
+    where = "verify_status = 'pending'"
+    params: list = []
+    if state_code:
+        where += " AND state_code = ?"
+        params.append(state_code)
+    sql = f"SELECT * FROM entity_procurement WHERE {where} ORDER BY first_seen"
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    return conn.execute(sql, params).fetchall()
+
+
+def entity_procurement_stats(conn: sqlite3.Connection) -> dict:
+    total = conn.execute("SELECT COUNT(*) AS n FROM entity_procurement").fetchone()["n"]
+    by_status = {
+        r["verify_status"]: r["n"]
+        for r in conn.execute(
+            "SELECT verify_status, COUNT(*) AS n FROM entity_procurement GROUP BY verify_status"
+        ).fetchall()
+    }
+    by_platform = {
+        r["portal_platform"]: r["n"]
+        for r in conn.execute(
+            "SELECT portal_platform, COUNT(*) AS n FROM entity_procurement "
+            "WHERE portal_platform IS NOT NULL GROUP BY portal_platform ORDER BY n DESC"
+        ).fetchall()
+    }
+    return {"total": total, "by_status": by_status, "by_platform": by_platform}
+
+
 # ---------------------------------------------------------------------------
 # Reads (used by the dashboard server)
 # ---------------------------------------------------------------------------
@@ -264,6 +381,7 @@ def counts(conn: sqlite3.Connection) -> dict:
         "runs": conn.execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"],
         "opportunities": conn.execute("SELECT COUNT(*) AS n FROM opportunities").fetchone()["n"],
         "corpus_docs": conn.execute("SELECT COUNT(*) AS n FROM corpus_docs").fetchone()["n"],
+        "entity_procurement": conn.execute("SELECT COUNT(*) AS n FROM entity_procurement").fetchone()["n"],
     }
 
 
