@@ -39,6 +39,33 @@ PRINCIPALITIES_JSONL = Path(r"G:\repos\principalities-index\data\master_gov_unit
 
 MIDWEST_STATES = ["IL", "OH", "IN", "MI", "WI", "MN", "IA", "MO", "KS", "NE", "ND", "SD"]
 
+# Census-of-Governments (principalities-index) is LOCAL government only --
+# confirmed 2026-08-10 (government_type values are only County/Municipal/
+# Township/None, no State). State-level procurement portals typically carry
+# more RFP volume per entity than any single county/township, per Jay's
+# 2026-08-10 direction to cascade state -> county -> city/township. This is
+# a separate, hand-curated seed (~50 entries max, not scraped) -- each URL
+# below was looked up and sourced this session, not recalled from memory, to
+# hold to the same "trust but verify" bar as the scraped data (state, name,
+# procurement office URL, source).
+STATE_PORTALS = {
+    "IL": ("Illinois", "https://www.bidbuy.illinois.gov/bso/"),
+    "OH": ("Ohio", "https://procure.ohio.gov"),
+    "IN": ("Indiana", "https://secure.in.gov/idoa/procurement/current-business-opportunities/"),
+    "MI": ("Michigan", "https://www.michigan.gov/dtmb/procurement/contractconnect"),
+    "WI": ("Wisconsin", "https://vendornet.wi.gov/"),
+    "MN": ("Minnesota", "https://mn.gov/admin/osp/vendors/solicitations-and-contract-opportunities/supplier-portal/"),
+    "IA": ("Iowa", "https://bidopportunities.iowa.gov/"),
+    "MO": ("Missouri", "https://missouribuys.mo.gov/bid-board"),
+    "KS": ("Kansas", "https://admin.ks.gov/offices/procurement-contracts/bidding--contracts/additional-bid-opportunities"),
+    "NE": ("Nebraska", "https://das.nebraska.gov/materiel/bid-opportunities.html"),
+    "ND": ("North Dakota", "https://www.omb.nd.gov/doing-business-state/procurement/ndbuys"),
+    "SD": ("South Dakota", "https://boa.sd.gov/central-services/procurement-management/"),
+    "CA": ("California", "https://caleprocure.ca.gov/"),
+    "OR": ("Oregon", "https://orpin.oregon.gov/"),
+    "WA": ("Washington", "https://des.wa.gov/sell/bid-opportunities"),
+}
+
 _UA = {
     "User-Agent": "primordial-observatory/1.0 (sovereign-local entity verifier; contact jay@apexronin.com)",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -114,6 +141,30 @@ def seed(states: list[str] | None = None) -> int:
     with db.session() as conn:
         for e in entities:
             db.seed_entity(conn, e, seen_at)
+            n += 1
+    return n
+
+
+def seed_states(states: list[str] | None = None) -> int:
+    """Seed the hand-curated STATE_PORTALS rows. entity_id is "STATE-<code>"."""
+    wanted = states or list(STATE_PORTALS.keys())
+    seen_at = _now()
+    db.init_db()
+    n = 0
+    with db.session() as conn:
+        for code in wanted:
+            if code not in STATE_PORTALS:
+                continue
+            name, url = STATE_PORTALS[code]
+            db.seed_entity(conn, {
+                "entity_id": f"STATE-{code}",
+                "name": f"State of {name} (procurement office)",
+                "state_code": code,
+                "government_type": "0 - STATE",
+                "county": None,
+                "population": None,
+                "website": url,
+            }, seen_at)
             n += 1
     return n
 
@@ -295,6 +346,10 @@ def main() -> None:
     p_verify.add_argument("--delay", type=float, default=0.0, help="extra seconds after each completed request (default 0, no throttle needed -- each entity is a different host)")
     p_verify.add_argument("--workers", type=int, default=20, help="concurrent requests in flight (default 20)")
 
+    p_seed_states = sub.add_parser("seed-states", help="Seed the hand-curated state-level procurement portals (STATE_PORTALS)")
+    p_seed_states.add_argument("--states", default=None,
+                               help="comma-separated state codes (default: all in STATE_PORTALS)")
+
     sub.add_parser("stats", help="Print entity_procurement counts by status and platform")
 
     args = ap.parse_args()
@@ -302,6 +357,11 @@ def main() -> None:
         states = None if args.states.lower() == "all" else [s.strip() for s in args.states.split(",") if s.strip()]
         n = seed(states)
         print(f"[*] Seeded {n} entities into entity_procurement.")
+        print(f"[*] DB: {db.DB_PATH}")
+    elif args.cmd == "seed-states":
+        states = [s.strip() for s in args.states.split(",")] if args.states else None
+        n = seed_states(states)
+        print(f"[*] Seeded {n} state-level procurement portals into entity_procurement.")
         print(f"[*] DB: {db.DB_PATH}")
     elif args.cmd == "verify":
         verify(args.state, args.limit, args.delay, args.workers)
