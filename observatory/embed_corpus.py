@@ -5,9 +5,13 @@ GAO fraud cases -- a SECOND index alongside the curated legal_corpus (Jay's call
 two indexes, merged by score at query time, so the curated set stays distinct).
 
 Follows the EXACT manifest contract already on disk (legal_corpus / principalities):
-  embedder text-embedding-nomic-embed-text-v1.5, 768-dim, cosine via L2-normalized
+  embedder nomic-embed-text-v1.5, 768-dim, cosine via L2-normalized
   IndexFlatIP, doc_prefix "search_document: ", query_prefix "search_query: ".
 Never mix embedders in one index.
+
+Served via Ollama (localhost:11434, OpenAI-compat /v1/embeddings) as of 2026-08-10 --
+LM Studio was removed from the box (crash-prone Electron GUI); same model, same
+dims, just a stable headless server. `ollama pull nomic-embed-text` before running.
 
 Writes:  G:\\AI-Models\\indexes\\corpus_docs.faiss + corpus_docs_meta.jsonl,
          adds a "corpus_docs" entry to index_manifest.json,
@@ -32,9 +36,13 @@ import requests
 
 from . import db
 
-EMBED_URL = "http://localhost:1234/v1/embeddings"
-EMBED_MODEL = "text-embedding-nomic-embed-text-v1.5"
+EMBED_URL = "http://localhost:11434/api/embed"
+EMBED_MODEL = "nomic-embed-text"
 EMBED_DIMS = 768
+# num_gpu=0 pins this to CPU. The RX580 is the display GPU and OLLAMA_VULKAN=1 is set
+# on this box, so any GPU-offloaded model risks the same amdwddmg TDR/crash pattern
+# already root-caused for LM Studio. nomic-embed-text is 137M params -- CPU costs
+# nothing here, so there's no reason to touch the GPU for this job at all.
 DOC_PREFIX = "search_document: "
 QUERY_PREFIX = "search_query: "
 BATCH_SIZE = 32
@@ -47,14 +55,12 @@ NAME = "corpus_docs"
 
 
 def embed_batch(texts: list[str]) -> np.ndarray:
-    payload = {"model": EMBED_MODEL, "input": texts}
+    payload = {"model": EMBED_MODEL, "input": texts, "options": {"num_gpu": 0}}
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             r = requests.post(EMBED_URL, json=payload, timeout=300)
             r.raise_for_status()
-            data = r.json()["data"]
-            data.sort(key=lambda d: d["index"])
-            return np.array([d["embedding"] for d in data], dtype=np.float32)
+            return np.array(r.json()["embeddings"], dtype=np.float32)
         except Exception as e:
             if attempt == MAX_RETRIES:
                 raise
@@ -121,7 +127,7 @@ def build(limit: int | None = None) -> dict:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     manifest[NAME] = {
         "embedder": EMBED_MODEL,
-        "embedder_serving": "LM Studio /v1/embeddings (localhost:1234)",
+        "embedder_serving": "Ollama /v1/embeddings (localhost:11434)",
         "dimensions": EMBED_DIMS,
         "metric": "cosine (L2-normalized IndexFlatIP)",
         "doc_prefix": DOC_PREFIX,
