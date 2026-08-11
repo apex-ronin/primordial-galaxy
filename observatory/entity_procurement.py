@@ -39,7 +39,11 @@ PRINCIPALITIES_JSONL = Path(r"G:\repos\principalities-index\data\master_gov_unit
 
 MIDWEST_STATES = ["IL", "OH", "IN", "MI", "WI", "MN", "IA", "MO", "KS", "NE", "ND", "SD"]
 
-_UA = {"User-Agent": "primordial-observatory/1.0 (sovereign-local entity verifier; contact jay@apexronin.com)"}
+_UA = {
+    "User-Agent": "primordial-observatory/1.0 (sovereign-local entity verifier; contact jay@apexronin.com)",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 # Domain substrings for the ~10 shared platforms small governments cluster on
 # (ARC6 plan, phase 2 rationale -- one adapter unlocks thousands of entities).
@@ -65,9 +69,6 @@ PROCUREMENT_KEYWORDS = ["bid", "rfp", "rfq", "procurement", "purchasing", "solic
 
 _ANCHOR_RE = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.I | re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
-
-_session = requests.Session()
-_session.headers.update(_UA)
 
 
 # ---------------------------------------------------------------------------
@@ -166,9 +167,35 @@ def verify_one(row) -> dict:
             "verify_status": "no_website", "error_detail": None, "meta_json": None,
         }
 
-    url = website if website.startswith(("http://", "https://")) else f"http://{website}"
+    # Always try HTTPS first regardless of what scheme the 2022 source data
+    # recorded: most gov sites are HTTPS-only now (or reject/hang on port 80
+    # entirely), and the source's own "http://" prefix is just as often stale
+    # as a bare domain would be (2026-08-10 finding: Alameda/Contra Costa/El
+    # Dorado all stored as "http://..." and timed out on port 80). Only try
+    # the second scheme on a connection-level failure, never on an HTTP
+    # status code -- a 403/404 is a real answer from a real server.
+    host_and_path = re.sub(r"^https?://", "", website, flags=re.I)
+    candidates = [f"https://{host_and_path}", f"http://{host_and_path}"]
+
+    resp = last_exc = None
+    for url in candidates:
+        try:
+            # No shared session: each entity is a different host, so connection-pool
+            # reuse buys nothing, and a plain requests.get() keeps this call
+            # trivially thread-safe for the concurrent verify() pool below.
+            resp = requests.get(url, headers=_UA, timeout=12, allow_redirects=True)
+            break
+        except requests.RequestException as e:
+            last_exc = e
+            continue
+
+    if resp is None:
+        return {
+            "website_live": 0, "website_status_code": None, "procurement_url": None,
+            "procurement_confidence": None, "portal_platform": None,
+            "verify_status": "site_down", "error_detail": str(last_exc)[:500], "meta_json": None,
+        }
     try:
-        resp = _session.get(url, timeout=15, allow_redirects=True)
         live = resp.status_code < 400
         if not live:
             return {
@@ -186,12 +213,6 @@ def verify_one(row) -> dict:
             "procurement_confidence": confidence, "portal_platform": platform,
             "verify_status": status, "error_detail": None, "meta_json": None,
         }
-    except requests.RequestException as e:
-        return {
-            "website_live": 0, "website_status_code": None, "procurement_url": None,
-            "procurement_confidence": None, "portal_platform": None,
-            "verify_status": "site_down", "error_detail": str(e)[:500], "meta_json": None,
-        }
     except Exception as e:
         return {
             "website_live": None, "website_status_code": None, "procurement_url": None,
@@ -200,28 +221,54 @@ def verify_one(row) -> dict:
         }
 
 
-def verify(state_code: str | None = None, limit: int | None = None, delay: float = 1.0) -> dict:
-    """Run the verifier over pending rows. Resumable: only touches verify_status='pending'."""
+def verify(state_code: str | None = None, limit: int | None = None,
+          delay: float = 0.0, workers: int = 20) -> dict:
+    """Run the verifier over pending rows, `workers` requests in flight at once.
+
+    Resumable: only touches verify_status='pending'. Network fetches
+    (verify_one) run concurrently in a thread pool -- each entity is a
+    different host, so there's no shared connection or rate-limit state to
+    protect, unlike the single-API fulltext.py job this pattern otherwise
+    mirrors. DB writes stay on the main thread (one row at a time, own
+    short-lived connection per write) so sqlite never sees concurrent
+    writers -- only the I/O-bound part is parallel.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     db.init_db()
-    verified = no_website = site_down = no_proc = errors = 0
     with db.session() as conn:
         rows = db.pending_entities(conn, state_code, limit)
-        total = len(rows)
-        print(f"[*] {total} pending entities" + (f" (state={state_code})" if state_code else ""))
-        for i, row in enumerate(rows, 1):
-            result = verify_one(row)
-            db.record_verification(conn, row["entity_id"], result, _now())
-            conn.commit()  # per-row commit -> killable/resumable, same as fulltext.py
+    total = len(rows)
+    print(f"[*] {total} pending entities" + (f" (state={state_code})" if state_code else "")
+          + f"  workers={workers}")
+
+    verified = no_website = site_down = no_proc = errors = 0
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(verify_one, row): row for row in rows}
+        for fut in as_completed(futures):
+            row = futures[fut]
+            try:
+                result = fut.result()
+            except Exception as e:  # pragma: no cover - verify_one already catches broadly
+                result = {
+                    "website_live": None, "website_status_code": None, "procurement_url": None,
+                    "procurement_confidence": None, "portal_platform": None,
+                    "verify_status": "error", "error_detail": str(e)[:500], "meta_json": None,
+                }
+            with db.session() as conn:
+                db.record_verification(conn, row["entity_id"], result, _now())
+            done += 1
             status = result["verify_status"]
             verified += status == "verified"
             no_website += status == "no_website"
             site_down += status == "site_down"
             no_proc += status == "no_procurement_found"
             errors += status == "error"
-            if i % 10 == 0 or i == total:
-                print(f"    {i}/{total}  verified={verified} no_website={no_website} "
+            if done % 50 == 0 or done == total:
+                print(f"    {done}/{total}  verified={verified} no_website={no_website} "
                       f"site_down={site_down} no_procurement={no_proc} errors={errors}")
-            if status != "no_website":  # no network call was made for no_website rows
+            if delay:
                 time.sleep(delay)
 
     summary = {"total": total, "verified": verified, "no_website": no_website,
@@ -245,7 +292,8 @@ def main() -> None:
     p_verify = sub.add_parser("verify", help="Check website liveness + locate procurement page + detect platform")
     p_verify.add_argument("--state", default=None, help="restrict to one state code")
     p_verify.add_argument("--limit", type=int, default=None, help="cap rows this run (use a small value to test)")
-    p_verify.add_argument("--delay", type=float, default=1.0, help="seconds between requests (default 1.0)")
+    p_verify.add_argument("--delay", type=float, default=0.0, help="extra seconds after each completed request (default 0, no throttle needed -- each entity is a different host)")
+    p_verify.add_argument("--workers", type=int, default=20, help="concurrent requests in flight (default 20)")
 
     sub.add_parser("stats", help="Print entity_procurement counts by status and platform")
 
@@ -256,7 +304,7 @@ def main() -> None:
         print(f"[*] Seeded {n} entities into entity_procurement.")
         print(f"[*] DB: {db.DB_PATH}")
     elif args.cmd == "verify":
-        verify(args.state, args.limit, args.delay)
+        verify(args.state, args.limit, args.delay, args.workers)
     elif args.cmd == "stats":
         db.init_db()
         with db.session() as conn:
