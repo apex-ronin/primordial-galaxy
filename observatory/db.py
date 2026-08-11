@@ -19,6 +19,12 @@ Four tables:
                        procurement/bids page was located, and which shared
                        portal platform (if any) it runs on. Deduped by
                        entity_id (the Census GIDID).
+  outreach_review    — Arc #6 Heartland review queue (2026-08-11, Jay's
+                       directive: his eyes on everything before it sends).
+                       One row per entity flagged worth his attention, with a
+                       generated draft. Nothing here ever sends itself --
+                       "approved" just means Jay has seen it and the draft is
+                       ready for HIM to send from his own email client.
 """
 
 from __future__ import annotations
@@ -102,6 +108,7 @@ CREATE TABLE IF NOT EXISTS entity_procurement (
     county                  TEXT,
     population              INTEGER,
     website                 TEXT,   -- input: contact_skeleton.web_address from principalities-index
+    contact_email           TEXT,   -- input: contact_skeleton.caio_email from principalities-index -- usually NULL
     website_live            INTEGER,-- 0 | 1 | NULL(not yet checked)
     website_status_code     INTEGER,
     procurement_url         TEXT,   -- discovered bids/RFP/procurement page, if any
@@ -115,7 +122,26 @@ CREATE TABLE IF NOT EXISTS entity_procurement (
     first_seen              TEXT,
     last_seen               TEXT,
     last_verified_at        TEXT,
+    far_citations_json      TEXT,   -- JSON list of FAR/DFARS clause numbers found on procurement_url's
+                                    -- page text, e.g. ["52.204-21"] -- a marker the solicitation carries
+                                    -- federal grant flow-down clauses, worth a human compliance look.
+                                    -- NULL = not scanned yet; "[]" = scanned, none found.
     meta_json               TEXT
+);
+
+CREATE TABLE IF NOT EXISTS outreach_review (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_id      TEXT,   -- FK to entity_procurement.entity_id
+    reason         TEXT,   -- human-readable why this was flagged
+    priority_score INTEGER,
+    contact_email  TEXT,   -- from principalities-index contact_skeleton.caio_email -- usually NULL;
+                           -- when NULL the dashboard must say so plainly, never imply a verified recipient
+    draft_subject  TEXT,
+    draft_body     TEXT,
+    status         TEXT DEFAULT 'pending_review',  -- pending_review | approved | dismissed
+    created_at     TEXT,
+    decided_at     TEXT,
+    UNIQUE(entity_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_opp_win   ON opportunities(win_probability DESC);
@@ -125,6 +151,8 @@ CREATE INDEX IF NOT EXISTS idx_corpus_src ON corpus_docs(source);
 CREATE INDEX IF NOT EXISTS idx_entproc_state  ON entity_procurement(state_code);
 CREATE INDEX IF NOT EXISTS idx_entproc_status ON entity_procurement(verify_status);
 CREATE INDEX IF NOT EXISTS idx_entproc_portal ON entity_procurement(portal_platform);
+CREATE INDEX IF NOT EXISTS idx_outreach_status   ON outreach_review(status);
+CREATE INDEX IF NOT EXISTS idx_outreach_priority ON outreach_review(priority_score DESC);
 """
 
 
@@ -142,10 +170,28 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
     return conn
 
 
+# Columns added to entity_procurement after its first release. CREATE TABLE IF
+# NOT EXISTS is a no-op on an already-existing table, so new columns need an
+# explicit ALTER TABLE -- this keeps the live DB (with real, slow-to-redo
+# verification results) intact instead of requiring a drop/recreate.
+_ENTITY_PROCUREMENT_MIGRATIONS = [
+    ("contact_email", "TEXT"),
+    ("far_citations_json", "TEXT"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(entity_procurement)")}
+    for col, coltype in _ENTITY_PROCUREMENT_MIGRATIONS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE entity_procurement ADD COLUMN {col} {coltype}")
+
+
 def init_db(db_path: str | None = None) -> None:
-    """Create tables/indexes if absent. Idempotent."""
+    """Create tables/indexes if absent, then apply any pending column migrations. Idempotent."""
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
 
 
@@ -255,7 +301,7 @@ def seed_entity(conn: sqlite3.Connection, entity: dict, seen_at: str) -> None:
     set only on first insert.
     """
     cols = ["entity_id", "name", "state_code", "government_type", "county",
-            "population", "website", "first_seen", "last_seen", "verify_status"]
+            "population", "website", "contact_email", "first_seen", "last_seen", "verify_status"]
     row = {
         "entity_id": entity["entity_id"],
         "name": entity.get("name"),
@@ -264,12 +310,13 @@ def seed_entity(conn: sqlite3.Connection, entity: dict, seen_at: str) -> None:
         "county": entity.get("county"),
         "population": entity.get("population"),
         "website": entity.get("website"),
+        "contact_email": entity.get("contact_email"),
         "first_seen": seen_at,
         "last_seen": seen_at,
         "verify_status": "pending",
     }
     update_cols = ["name", "state_code", "government_type", "county",
-                   "population", "website", "last_seen"]
+                   "population", "website", "contact_email", "last_seen"]
     set_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
     placeholders = ", ".join("?" for _ in cols)
     conn.execute(
@@ -323,6 +370,60 @@ def entity_procurement_stats(conn: sqlite3.Connection) -> dict:
         ).fetchall()
     }
     return {"total": total, "by_status": by_status, "by_platform": by_platform}
+
+
+def record_far_citations(conn: sqlite3.Connection, entity_id: str, citations: list[str]) -> None:
+    """Store the compliance-scan result for one entity_procurement row (may be an empty list)."""
+    conn.execute(
+        "UPDATE entity_procurement SET far_citations_json = ? WHERE entity_id = ?",
+        (_dumps(citations), entity_id),
+    )
+
+
+def unscanned_verified_entities(conn: sqlite3.Connection, limit: int | None = None) -> list[sqlite3.Row]:
+    """Verified rows (real procurement_url) not yet compliance-scanned."""
+    sql = ("SELECT * FROM entity_procurement WHERE verify_status = 'verified' "
+           "AND far_citations_json IS NULL ORDER BY first_seen")
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    return conn.execute(sql).fetchall()
+
+
+def upsert_outreach_review(conn: sqlite3.Connection, row: dict, created_at: str) -> None:
+    """Insert or refresh a review-queue row keyed on entity_id. Never overwrites a human decision
+    (status stays approved/dismissed across re-runs unless the row is still pending_review)."""
+    cols = ["entity_id", "reason", "priority_score", "contact_email",
+            "draft_subject", "draft_body", "created_at"]
+    row = {**row, "created_at": created_at}
+    placeholders = ", ".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO outreach_review ({', '.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(entity_id) DO UPDATE SET "
+        f"reason=excluded.reason, priority_score=excluded.priority_score, "
+        f"contact_email=excluded.contact_email, draft_subject=excluded.draft_subject, "
+        f"draft_body=excluded.draft_body "
+        f"WHERE outreach_review.status = 'pending_review'",
+        [row[c] for c in cols],
+    )
+
+
+def review_queue(conn: sqlite3.Connection, status: str = "pending_review",
+                 limit: int = 100) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT o.*, e.name AS entity_name, e.state_code, e.county, e.government_type, "
+        "e.population, e.website, e.procurement_url, e.portal_platform "
+        "FROM outreach_review o JOIN entity_procurement e ON e.entity_id = o.entity_id "
+        "WHERE o.status = ? ORDER BY o.priority_score DESC LIMIT ?",
+        (status, limit),
+    ).fetchall()
+
+
+def decide_review(conn: sqlite3.Connection, review_id: int, status: str, decided_at: str) -> None:
+    """status must be 'approved' or 'dismissed' -- both are human decisions, never automatic."""
+    conn.execute(
+        "UPDATE outreach_review SET status = ?, decided_at = ? WHERE id = ?",
+        (status, decided_at, review_id),
+    )
 
 
 # ---------------------------------------------------------------------------

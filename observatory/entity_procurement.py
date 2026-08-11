@@ -39,6 +39,16 @@ PRINCIPALITIES_JSONL = Path(r"G:\repos\principalities-index\data\master_gov_unit
 
 MIDWEST_STATES = ["IL", "OH", "IN", "MI", "WI", "MN", "IA", "MO", "KS", "NE", "ND", "SD"]
 
+# Census Bureau regions, same pattern as MIDWEST_STATES above (which is exactly
+# East North Central + West North Central). Region sweep order per Jay's
+# 2026-08-10/11 direction: Midwest -> West Coast (done) -> South -> East.
+WEST_COAST_STATES = ["CA", "OR", "WA"]
+SOUTH_STATES = [  # South Atlantic + East South Central + West South Central
+    "DE", "MD", "DC", "VA", "WV", "NC", "SC", "GA", "FL",
+    "KY", "TN", "MS", "AL",
+    "AR", "LA", "OK", "TX",
+]
+
 # Census-of-Governments (principalities-index) is LOCAL government only --
 # confirmed 2026-08-10 (government_type values are only County/Municipal/
 # Township/None, no State). State-level procurement portals typically carry
@@ -64,6 +74,24 @@ STATE_PORTALS = {
     "CA": ("California", "https://caleprocure.ca.gov/"),
     "OR": ("Oregon", "https://orpin.oregon.gov/"),
     "WA": ("Washington", "https://des.wa.gov/sell/bid-opportunities"),
+    # South region, sourced 2026-08-11
+    "DE": ("Delaware", "https://bids.delaware.gov/"),
+    "MD": ("Maryland", "https://procurement.maryland.gov"),
+    "DC": ("District of Columbia", "https://ocp.dc.gov/"),
+    "VA": ("Virginia", "https://eva.virginia.gov/"),
+    "WV": ("West Virginia", "https://wvtreasury.gov/about/bidding-opportunities"),
+    "NC": ("North Carolina", "https://evp.nc.gov/"),
+    "SC": ("South Carolina", "https://scbo.sc.gov/"),
+    "GA": ("Georgia", "https://ssl.doas.state.ga.us/gpr/"),
+    "FL": ("Florida", "https://vendor.myfloridamarketplace.com/"),
+    "KY": ("Kentucky", "https://finance.ky.gov/eProcurement/Pages/default.aspx"),
+    "TN": ("Tennessee", "https://www.tn.gov/generalservices/procurement.html"),
+    "MS": ("Mississippi", "https://www.ms.gov/dfa/contract_bid_search/Bid"),
+    "AL": ("Alabama", "https://purchasing.alabama.gov"),
+    "AR": ("Arkansas", "https://sas.arkansas.gov/procurement/bid-opportunities/"),
+    "LA": ("Louisiana", "https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubmain.cfm"),
+    "OK": ("Oklahoma", "https://www.ok.gov/dcs/solicit/app/index.php"),
+    "TX": ("Texas", "https://www.txsmartbuy.gov/esbd"),
 }
 
 _UA = {
@@ -121,6 +149,7 @@ def load_entities(states: list[str] | None = None) -> list[dict]:
             state = meta.get("state_code")
             if wanted and state not in wanted:
                 continue
+            contact = rec.get("contact_skeleton") or {}
             out.append({
                 "entity_id": rec["id"],
                 "name": rec.get("name"),
@@ -128,7 +157,8 @@ def load_entities(states: list[str] | None = None) -> list[dict]:
                 "government_type": meta.get("government_type"),
                 "county": meta.get("county"),
                 "population": meta.get("population"),
-                "website": (rec.get("contact_skeleton") or {}).get("web_address"),
+                "website": contact.get("web_address"),
+                "contact_email": contact.get("caio_email"),
             })
     return out
 
@@ -328,6 +358,114 @@ def verify(state_code: str | None = None, limit: int | None = None,
     return summary
 
 
+# ---------------------------------------------------------------------------
+# step 3: compliance scan + review queue (2026-08-11, Jay's directive)
+#
+# Local/county solicitations don't run under the FAR themselves -- but when a
+# local project is federally grant-funded (FEMA, DOT, HUD, etc.) the award
+# terms flow federal clauses down into the local solicitation, and that
+# boilerplate is exactly the kind of thing that goes stale (ARC6 plan's
+# "compliance red-team as wedge": RFO effective 2026-04-17 renumbered/split a
+# lot of FAR clauses -- see corpus_docs source='far' vs 'far_rfo'). A
+# procurement page that cites a FAR/DFARS clause number at all is a flow-down
+# marker worth a human look. This is a first-pass SIGNAL, not the full
+# antibody_agent semantic mismatch-detection pipeline (that needs the FAISS
+# corpus + LLM cascade and is real future work, not wired in here).
+# ---------------------------------------------------------------------------
+
+_FAR_CITATION_RE = re.compile(r"(?:FAR|DFARS)\s*(\d{1,3}\.\d{2,4}(?:-\d{1,4})?)", re.I)
+
+
+def scan_one_compliance(row) -> list[str]:
+    """Fetch a verified entity's procurement_url and return any FAR/DFARS clause numbers cited."""
+    url = row["procurement_url"]
+    if not url:
+        return []
+    try:
+        resp = requests.get(url, headers=_UA, timeout=12, allow_redirects=True)
+        if resp.status_code >= 400:
+            return []
+        return sorted(set(_FAR_CITATION_RE.findall(resp.text)))
+    except requests.RequestException:
+        return []
+
+
+def scan_compliance(limit: int | None = None, workers: int = 20) -> dict:
+    """Compliance-scan every verified-but-unscanned entity. Resumable like verify()."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    db.init_db()
+    with db.session() as conn:
+        rows = db.unscanned_verified_entities(conn, limit)
+    total = len(rows)
+    print(f"[*] {total} verified entities need a compliance scan  workers={workers}")
+
+    flagged = done = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(scan_one_compliance, row): row for row in rows}
+        for fut in as_completed(futures):
+            row = futures[fut]
+            try:
+                citations = fut.result()
+            except Exception:
+                citations = []
+            with db.session() as conn:
+                db.record_far_citations(conn, row["entity_id"], citations)
+            done += 1
+            flagged += bool(citations)
+            if done % 50 == 0 or done == total:
+                print(f"    {done}/{total}  flagged={flagged}")
+
+    summary = {"total": total, "flagged": flagged}
+    print(f"[*] done: {summary}")
+    return summary
+
+
+def _draft_for(row) -> tuple[str, int, str, str]:
+    """Build (reason, priority_score, draft_subject, draft_body) for a FAR-citation-flagged entity."""
+    citations = json.loads(row["far_citations_json"] or "[]")
+    reason = f"Procurement page cites federal clause(s): {', '.join(citations)} -- possible grant flow-down, worth a compliance look."
+    priority = 10 * len(citations)
+    subject = f"Quick note on a federal clause reference in {row['name']}'s posted solicitation"
+    body = (
+        f"Hello,\n\n"
+        f"While reviewing publicly posted procurement notices, we noticed {row['name']}'s "
+        f"solicitation page ({row['procurement_url']}) references the following federal "
+        f"acquisition clause(s): {', '.join(citations)}.\n\n"
+        f"The FAR underwent a significant overhaul (effective 2026-04-17) that renumbered or "
+        f"split a number of clauses. If this solicitation involves federally-funded work, it may "
+        f"be worth a quick check that the cited clause language is still current. Happy to share "
+        f"what we found and talk through it if useful -- no obligation either way.\n\n"
+        f"Best,\n[Your name]"
+    )
+    return reason, priority, subject, body
+
+
+def build_review_queue(limit: int | None = None) -> int:
+    """Promote FAR-citation-flagged entities into outreach_review. Returns count added/refreshed."""
+    db.init_db()
+    created_at = _now()
+    n = 0
+    with db.session() as conn:
+        sql = ("SELECT * FROM entity_procurement WHERE verify_status = 'verified' "
+               "AND far_citations_json IS NOT NULL AND far_citations_json != '[]'")
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        rows = conn.execute(sql).fetchall()
+        for row in rows:
+            reason, priority, subject, body = _draft_for(row)
+            db.upsert_outreach_review(conn, {
+                "entity_id": row["entity_id"],
+                "reason": reason,
+                "priority_score": priority,
+                "contact_email": row["contact_email"],
+                "draft_subject": subject,
+                "draft_body": body,
+            }, created_at)
+            n += 1
+    return n
+
+
 def _now() -> str:
     return datetime.now().isoformat()
 
@@ -350,6 +488,13 @@ def main() -> None:
     p_seed_states.add_argument("--states", default=None,
                                help="comma-separated state codes (default: all in STATE_PORTALS)")
 
+    p_scan = sub.add_parser("scan-compliance", help="Scan verified entities' procurement pages for FAR/DFARS clause citations")
+    p_scan.add_argument("--limit", type=int, default=None)
+    p_scan.add_argument("--workers", type=int, default=20)
+
+    p_queue = sub.add_parser("build-queue", help="Promote FAR-citation-flagged entities into the outreach_review queue")
+    p_queue.add_argument("--limit", type=int, default=None)
+
     sub.add_parser("stats", help="Print entity_procurement counts by status and platform")
 
     args = ap.parse_args()
@@ -365,6 +510,11 @@ def main() -> None:
         print(f"[*] DB: {db.DB_PATH}")
     elif args.cmd == "verify":
         verify(args.state, args.limit, args.delay, args.workers)
+    elif args.cmd == "scan-compliance":
+        scan_compliance(args.limit, args.workers)
+    elif args.cmd == "build-queue":
+        n = build_review_queue(args.limit)
+        print(f"[*] {n} entities in the review queue (pending_review rows refreshed, human decisions untouched).")
     elif args.cmd == "stats":
         db.init_db()
         with db.session() as conn:
