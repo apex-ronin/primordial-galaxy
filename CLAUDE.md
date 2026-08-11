@@ -3,7 +3,7 @@
 ## What This Project Is
 
 Government contract intelligence + red team simulation system.
-Scrapes public procurement sources → analyzes via a local LLM cascade (LM Studio → Venice → Anthropic) → generates red team threats + antibody clauses grounded in a local FAISS legal corpus.
+Scrapes public procurement sources → analyzes via a local LLM cascade (local generation tier → Venice → Anthropic) → generates red team threats + antibody clauses grounded in a local FAISS legal corpus. **2026-08-10: LM Studio removed from the box.** Retrieval embeddings now served by Ollama (see below). The local *generation* tier (`execution/llm_client.py`, `LOCAL_BASE_URL`) is still hardcoded to LM Studio's port 1234 and is currently dark — the cascade falls through to Venice, same as it already does when local is simply unreachable. Not yet rewired to Ollama (which already has `gemma4:12b` pulled and could serve it) — a fast-follow, not done.
 Domain specialization layer of R.O.N.I.N. / JARVIS.
 
 ## Core Operating Principles
@@ -38,7 +38,7 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 - **Inference:** Claude Sonnet via Anthropic API directly (no Vertex endpoint).
 - **Legal corpus:** Source JSONs on disk at `data/legal_corpus/` — 104 clauses, 8 files. Ground truth.
 - **Vertex datastore:** DELETED with govtech-control. Google Discovery source retired 2026-06-10 — `discovery_engine.py` is a no-op stub and the google-cloud deps were dropped.
-- **Retrieval:** local nomic-embed FAISS indexes at `G:\AI-Models\indexes` (legal_corpus 104 clauses, principalities 78k). Embedder served by LM Studio.
+- **Retrieval:** local nomic-embed FAISS indexes at `G:\AI-Models\indexes` (legal_corpus 104 clauses, principalities 78k, corpus_docs 1,788). Embedder served by Ollama (`localhost:11434`, CPU-pinned — see Model Preferences) as of 2026-08-10; was LM Studio, now removed from the box.
 
 ## Key Modules
 
@@ -61,7 +61,7 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 
 - File: `execution/antibody_agent.py` — exists and functional
 - Pipeline: semantic FAISS retrieval → clause drafting (LLM cascade) → grounded specificity gate → economic calibration
-- **Drafter:** local LLM cascade (LM Studio qwen3 → Venice → Anthropic) via `llm_client.complete(mode="precise")`
+- **Drafter:** local LLM cascade (local generation tier → Venice → Anthropic) via `llm_client.complete(mode="precise")`. Local generation tier currently dark (LM Studio removed 2026-08-10, not yet rewired) — cascade runs Venice → Anthropic.
 - **Retrieval:** semantic search over local nomic-embed FAISS index (`G:\AI-Models\indexes\legal_corpus.faiss`, mirrors ronin `prism_tools`); lexical keyword match retained as offline fallback (semantic rewire 2026-06-10)
 - **Validation:** `VALIDATED` requires grounding (cited far_reference matches a retrieved clause id) AND a specificity rubric score ≥75 (cadence / quantity / actor / enforcement teeth) — not verbosity (2026-06-10)
 - Interface: `antibody_agent.generate(opportunity, threat_assessment)`
@@ -103,6 +103,7 @@ Domain specialization layer of R.O.N.I.N. / JARVIS.
 ## Model Preferences
 
 Local-primary cascade (post-GCP teardown 2026-06-06 — no Vertex/Gemini anywhere):
-- **Triage / classification / scoring:** local `qwen3-8b` via LM Studio (`llm_client.complete(mode="fast")`)
+- **Triage / classification / scoring:** local `gemma-4-e4b` via LM Studio (`llm_client.complete(mode="fast")`) — swapped from `qwen3-8b` (Chinese/Alibaba) 2026-06-20 for the American-models decision. **Currently dark: LM Studio removed 2026-08-10, cascade falls to Venice.**
 - **Legal-precision drafting (antibody clauses):** cascade `mode="precise"` — local → Venice (llama-3.3-70b) → Anthropic API
-- **Retrieval embeddings:** `nomic-embed-text-v1.5` (768d) via LM Studio, indexed in local FAISS (`G:\AI-Models\indexes`)
+- **Retrieval embeddings:** `nomic-embed-text-v1.5` (768d, Nomic AI — American) via **Ollama** (`localhost:11434`, CPU-pinned — `OLLAMA_VULKAN=1` is set on this box and the RX580 is the display GPU, same TDR-crash risk already root-caused for LM Studio, so embed_corpus.py forces `num_gpu: 0`), indexed in local FAISS (`G:\AI-Models\indexes`). Was LM Studio.
+- **American-models hygiene applies to every local runner, not just LM Studio.** 2026-08-10: found `qwen3.6` (Chinese) and `minimax-m3:cloud` (Chinese, Ollama-cloud-routed) sitting in Ollama's own model library, unrelated to the June LM-Studio-specific scrub — deleted. Also deleted the entire `G:\_quarantined_models` quarantine (83GB, June scrub — was moved-not-deleted; Jay's 08-10 directive is delete-on-sight going forward, not quarantine-and-flag).
