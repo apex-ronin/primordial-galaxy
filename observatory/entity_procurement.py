@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,13 @@ import requests
 from . import db
 
 PRINCIPALITIES_JSONL = Path(r"G:\repos\principalities-index\data\master_gov_units_2022.jsonl")
+
+# execution/ isn't a package (no __init__.py, its own modules use bare sibling
+# imports) -- add it to sys.path explicitly so this package can reuse the real
+# LLM cascade for the grounded compliance check below, instead of duplicating it.
+_EXECUTION_DIR = Path(r"G:\repos\primordial-galaxy\execution")
+if str(_EXECUTION_DIR) not in sys.path:
+    sys.path.insert(0, str(_EXECUTION_DIR))
 
 MIDWEST_STATES = ["IL", "OH", "IN", "MI", "WI", "MN", "IA", "MO", "KS", "NE", "ND", "SD"]
 
@@ -366,18 +374,21 @@ def verify(state_code: str | None = None, limit: int | None = None,
 # terms flow federal clauses down into the local solicitation, and that
 # boilerplate is exactly the kind of thing that goes stale (ARC6 plan's
 # "compliance red-team as wedge": RFO effective 2026-04-17 renumbered/split a
-# lot of FAR clauses -- see corpus_docs source='far' vs 'far_rfo'). A
-# procurement page that cites a FAR/DFARS clause number at all is a flow-down
-# marker worth a human look. This is a first-pass SIGNAL, not the full
-# antibody_agent semantic mismatch-detection pipeline (that needs the FAISS
-# corpus + LLM cascade and is real future work, not wired in here).
+# lot of FAR clauses -- see corpus_docs source='far' vs 'far_rfo').
+#
+# Two-stage, per Jay's explicit correction (2026-08-11) -- the regex citation
+# match is a CHEAP PREFILTER to shortlist candidates, never the determination
+# itself. Every regex hit gets a real grounded pass (antibody_agent's actual
+# corpus_docs retrieval + the now-live local LLM tier) before anything is
+# trusted enough to reach the review queue.
 # ---------------------------------------------------------------------------
 
 _FAR_CITATION_RE = re.compile(r"(?:FAR|DFARS)\s*(\d{1,3}\.\d{2,4}(?:-\d{1,4})?)", re.I)
 
 
 def scan_one_compliance(row) -> list[str]:
-    """Fetch a verified entity's procurement_url and return any FAR/DFARS clause numbers cited."""
+    """Fetch a verified entity's procurement_url and return raw FAR/DFARS citation candidates
+    (regex prefilter only -- NOT a verdict, see assess_far_citation)."""
     url = row["procurement_url"]
     if not url:
         return []
@@ -390,8 +401,73 @@ def scan_one_compliance(row) -> list[str]:
         return []
 
 
+def _corpus_lookup(citation_number: str, source: str) -> str | None:
+    """corpus_docs title+text for a bare FAR-style number (e.g. '52.204-21') in one source, or None."""
+    with db.session() as conn:
+        row = conn.execute(
+            "SELECT title, text FROM corpus_docs WHERE source = ? AND citation LIKE ? LIMIT 1",
+            (source, f"%{citation_number}%"),
+        ).fetchone()
+    if not row:
+        return None
+    return f"{row['title'] or ''}\n{(row['text'] or '')[:600]}".strip()
+
+
+def assess_far_citation(citation_number: str) -> dict:
+    """Grounded verdict on one citation: current, superseded, or uncertain.
+
+    Evidence comes from corpus_docs, not the model's own memory: looks the
+    citation up in BOTH the RFO-current corpus (source='far_rfo', effective
+    2026-04-17) and the older CFR-edition corpus (source='far'). The LLM's job
+    is to weigh evidence that's actually retrieved, not to recall FAR numbers
+    from training data -- same grounding discipline as antibody_agent._is_grounded.
+    """
+    current_text = _corpus_lookup(citation_number, "far_rfo")
+    old_text = _corpus_lookup(citation_number, "far")
+
+    if current_text is None and old_text is None:
+        return {
+            "status": "uncertain",
+            "note": (f"FAR {citation_number} not found in either corpus on file "
+                     "(far_rfo ingest only covers Parts 3/9/15/19/52 so far -- "
+                     "absence isn't proof of anything either way)."),
+        }
+
+    evidence = (
+        f"RFO-current corpus (effective 2026-04-17) entry for FAR {citation_number}: "
+        f"{current_text[:600] if current_text else 'NOT FOUND in current corpus.'}\n\n"
+        f"Older CFR-edition corpus entry for FAR {citation_number}: "
+        f"{old_text[:600] if old_text else 'NOT FOUND in older corpus.'}"
+    )
+    prompt = (
+        f"A local government's posted procurement solicitation cites \"FAR {citation_number}\".\n\n"
+        f"{evidence}\n\n"
+        "Based ONLY on this evidence, is this citation likely still current, or likely "
+        "stale/superseded/renumbered? Do not guess beyond what the evidence shows -- if the "
+        "evidence is ambiguous or thin, say uncertain rather than force a call.\n\n"
+        "Return ONLY valid JSON, no markdown, no backticks:\n"
+        '{"status": "current" | "superseded" | "uncertain", "note": "one sentence, cite the evidence"}'
+    )
+    from llm_client import complete as llm_complete
+    raw = llm_complete(prompt, system="You are a JSON-only API. Output strictly valid JSON.", mode="fast")
+    if not raw:
+        return {"status": "uncertain", "note": "Local + fallback LLM tiers both unavailable for the grounded check."}
+    try:
+        if "```" in raw:
+            raw = raw.split("```")[1]
+            raw = raw[4:] if raw.startswith("json") else raw
+        verdict = json.loads(raw.strip())
+        status = verdict.get("status")
+        if status not in ("current", "superseded", "uncertain"):
+            status = "uncertain"
+        return {"status": status, "note": str(verdict.get("note", ""))[:400]}
+    except Exception:
+        return {"status": "uncertain", "note": "LLM response wasn't parseable JSON."}
+
+
 def scan_compliance(limit: int | None = None, workers: int = 20) -> dict:
-    """Compliance-scan every verified-but-unscanned entity. Resumable like verify()."""
+    """Compliance-scan every verified-but-unscanned entity: regex prefilter, then a grounded
+    LLM verdict on every candidate citation. Resumable like verify()."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     db.init_db()
@@ -400,7 +476,9 @@ def scan_compliance(limit: int | None = None, workers: int = 20) -> dict:
     total = len(rows)
     print(f"[*] {total} verified entities need a compliance scan  workers={workers}")
 
-    flagged = done = 0
+    # Stage 1: cheap concurrent prefilter (network I/O bound, same pattern as verify()).
+    prefiltered = done = 0
+    candidates = {}  # entity_id -> row, only rows with >=1 citation candidate
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(scan_one_compliance, row): row for row in rows}
         for fut in as_completed(futures):
@@ -409,40 +487,62 @@ def scan_compliance(limit: int | None = None, workers: int = 20) -> dict:
                 citations = fut.result()
             except Exception:
                 citations = []
-            with db.session() as conn:
-                db.record_far_citations(conn, row["entity_id"], citations)
             done += 1
-            flagged += bool(citations)
-            if done % 50 == 0 or done == total:
-                print(f"    {done}/{total}  flagged={flagged}")
+            if citations:
+                candidates[row["entity_id"]] = (row, citations)
+                prefiltered += 1
+            else:
+                with db.session() as conn:
+                    db.record_far_citations(conn, row["entity_id"], [])
+            if done % 100 == 0 or done == total:
+                print(f"    prefilter {done}/{total}  candidates={prefiltered}")
 
-    summary = {"total": total, "flagged": flagged}
+    # Stage 2: grounded LLM verdict per candidate citation -- CPU-bound (local tier),
+    # sequential on purpose (Jay's 50% cap is a per-call resource cap, not a license to
+    # fan out N concurrent local-model calls at once).
+    flagged = 0
+    total_candidates = len(candidates)
+    print(f"[*] {total_candidates} entities have citation candidates -- running grounded checks")
+    for i, (entity_id, (row, citations)) in enumerate(candidates.items(), 1):
+        verdicts = [{"citation": c, **assess_far_citation(c)} for c in citations]
+        with db.session() as conn:
+            db.record_far_citations(conn, entity_id, verdicts)
+        if any(v["status"] == "superseded" for v in verdicts):
+            flagged += 1
+        if i % 10 == 0 or i == total_candidates:
+            print(f"    grounded {i}/{total_candidates}  superseded={flagged}")
+
+    summary = {"total": total, "prefiltered": prefiltered, "flagged_superseded": flagged}
     print(f"[*] done: {summary}")
     return summary
 
 
-def _draft_for(row) -> tuple[str, int, str, str]:
-    """Build (reason, priority_score, draft_subject, draft_body) for a FAR-citation-flagged entity."""
-    citations = json.loads(row["far_citations_json"] or "[]")
-    reason = f"Procurement page cites federal clause(s): {', '.join(citations)} -- possible grant flow-down, worth a compliance look."
-    priority = 10 * len(citations)
+def _draft_for(row, superseded: list[dict]) -> tuple[str, int, str, str]:
+    """Build (reason, priority_score, draft_subject, draft_body) for an entity with at least
+    one citation the grounded check actually assessed as superseded (not just cited)."""
+    cite_list = ", ".join(f"FAR {v['citation']}" for v in superseded)
+    notes = " ".join(f"({v['citation']}: {v['note']})" for v in superseded if v.get("note"))
+    reason = f"Grounded check flagged possibly-superseded clause(s): {cite_list}. {notes}".strip()
+    priority = 15 * len(superseded)
     subject = f"Quick note on a federal clause reference in {row['name']}'s posted solicitation"
     body = (
         f"Hello,\n\n"
         f"While reviewing publicly posted procurement notices, we noticed {row['name']}'s "
-        f"solicitation page ({row['procurement_url']}) references the following federal "
-        f"acquisition clause(s): {', '.join(citations)}.\n\n"
-        f"The FAR underwent a significant overhaul (effective 2026-04-17) that renumbered or "
-        f"split a number of clauses. If this solicitation involves federally-funded work, it may "
-        f"be worth a quick check that the cited clause language is still current. Happy to share "
-        f"what we found and talk through it if useful -- no obligation either way.\n\n"
+        f"solicitation page ({row['procurement_url']}) references {cite_list}, which our "
+        f"records suggest may no longer be current following the FAR overhaul effective "
+        f"2026-04-17. Details: {notes}\n\n"
+        f"If this solicitation involves federally-funded work, it may be worth a quick check "
+        f"that the cited clause language is still accurate. Happy to share what we found and "
+        f"talk through it if useful -- no obligation either way.\n\n"
         f"Best,\n[Your name]"
     )
     return reason, priority, subject, body
 
 
 def build_review_queue(limit: int | None = None) -> int:
-    """Promote FAR-citation-flagged entities into outreach_review. Returns count added/refreshed."""
+    """Promote entities with a grounded 'superseded' verdict into outreach_review.
+    Citation-found-but-current, or uncertain, do NOT promote -- only an actual verdict does.
+    Returns count added/refreshed."""
     db.init_db()
     created_at = _now()
     n = 0
@@ -453,7 +553,16 @@ def build_review_queue(limit: int | None = None) -> int:
             sql += f" LIMIT {int(limit)}"
         rows = conn.execute(sql).fetchall()
         for row in rows:
-            reason, priority, subject, body = _draft_for(row)
+            try:
+                verdicts = json.loads(row["far_citations_json"] or "[]")
+            except Exception:
+                continue
+            # Old-format rows (pre-grounded-check, bare citation strings) have no "status" --
+            # skip them; they'll get real verdicts next scan-compliance pass.
+            superseded = [v for v in verdicts if isinstance(v, dict) and v.get("status") == "superseded"]
+            if not superseded:
+                continue
+            reason, priority, subject, body = _draft_for(row, superseded)
             db.upsert_outreach_review(conn, {
                 "entity_id": row["entity_id"],
                 "reason": reason,
