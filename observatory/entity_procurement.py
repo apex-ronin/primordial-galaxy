@@ -2,7 +2,7 @@
 
 Source data: principalities-index (separate repo, sibling checkout) --
 78,291 Census-of-Governments entities, one JSON object per line at
-G:\\repos\\principalities-index\\data\\master_gov_units_2022.jsonl. That repo
+<repos>/principalities-index/data/master_gov_units_2022.jsonl. That repo
 is the source of truth for entity identity (id/name/state/county/population/
 website); this module only reads it, never writes it.
 
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -33,15 +34,30 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
+from dotenv import load_dotenv
 
 from . import db
 
-PRINCIPALITIES_JSONL = Path(r"G:\repos\principalities-index\data\master_gov_units_2022.jsonl")
+# 2026-09-07: defensive load_dotenv() -- RONIN_PRINCIPALITIES_JSONL isn't
+# currently set in .env so this was a no-op in practice, but embed_corpus.py
+# just proved this exact pattern (os.environ.get without load_dotenv) silently
+# breaks the moment a real override does exist and this module runs standalone
+# (as it always has been run, via `python -m observatory.entity_procurement`).
+load_dotenv()
+
+# principalities-index is a sibling checkout next to this repo (both under the
+# same repos/ parent) -- default derived from this file's location, override
+# with RONIN_PRINCIPALITIES_JSONL if the sibling repo lives somewhere else.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+PRINCIPALITIES_JSONL = Path(os.environ.get(
+    "RONIN_PRINCIPALITIES_JSONL",
+    str(_REPO_ROOT.parent / "principalities-index" / "data" / "master_gov_units_2022.jsonl"),
+))
 
 # execution/ isn't a package (no __init__.py, its own modules use bare sibling
 # imports) -- add it to sys.path explicitly so this package can reuse the real
 # LLM cascade for the grounded compliance check below, instead of duplicating it.
-_EXECUTION_DIR = Path(r"G:\repos\primordial-galaxy\execution")
+_EXECUTION_DIR = _REPO_ROOT / "execution"
 if str(_EXECUTION_DIR) not in sys.path:
     sys.path.insert(0, str(_EXECUTION_DIR))
 
@@ -143,7 +159,7 @@ def load_entities(states: list[str] | None = None) -> list[dict]:
     if not PRINCIPALITIES_JSONL.exists():
         raise FileNotFoundError(
             f"principalities-index data not found at {PRINCIPALITIES_JSONL} "
-            "(expected a sibling checkout at G:\\repos\\principalities-index)"
+            "(expected a sibling checkout next to this repo, or set RONIN_PRINCIPALITIES_JSONL)"
         )
     wanted = {s.upper() for s in states} if states else None
     out = []

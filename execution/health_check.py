@@ -20,10 +20,11 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORPUS_DIR = os.path.join(BASE_DIR, "data", "legal_corpus")
 
 # Local nomic-embed FAISS retrieval (mirrors antibody_agent / prism_tools config).
+# Ollama native /api/embed, not OpenAI-compat /v1/embeddings -- see antibody_agent.py.
 INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", r"G:\AI-Models\indexes"))
 EMBED_URL = os.environ.get(
-    "LOCAL_LLM_BASE_URL", "http://localhost:1234/v1"
-).rstrip("/") + "/embeddings"
+    "LOCAL_LLM_BASE_URL", "http://localhost:11434"
+).rstrip("/") + "/api/embed"
 
 
 def check_anthropic_api():
@@ -88,7 +89,7 @@ def check_local_embedder():
     matching (degraded). This surfaces that as a visible WARN in the run log so a
     cold/failed embedder doesn't quietly cripple retrieval on an unattended run.
     """
-    print("[*] Checking local embedder (nomic via LM Studio)...")
+    print("[*] Checking local embedder (nomic via Ollama)...")
     manifest_path = INDEX_DIR / "index_manifest.json"
     if not manifest_path.exists():
         return False, f"Index manifest not found at {manifest_path} — retrieval will use keyword fallback"
@@ -104,7 +105,7 @@ def check_local_embedder():
         )
         if resp.status_code != 200:
             return False, f"Status {resp.status_code} — antibody falls back to keyword retrieval"
-        dims = len(resp.json()["data"][0]["embedding"])
+        dims = len(resp.json()["embeddings"][0])
         return True, f"OK ({embedder}, {dims}-dim)"
     except Exception as e:
         return False, f"Unreachable at {EMBED_URL} ({e}) — antibody falls back to keyword retrieval"

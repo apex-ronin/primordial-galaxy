@@ -144,6 +144,19 @@ CREATE TABLE IF NOT EXISTS outreach_review (
     UNIQUE(entity_id)
 );
 
+CREATE TABLE IF NOT EXISTS opportunity_documents (
+    link            TEXT PRIMARY KEY,  -- same key as opportunities.link
+    content_hash    TEXT,              -- sha256 of raw_text, detects a re-posted/amended link
+    raw_text_path   TEXT,              -- path under data/opportunity_archive/, full fetched text
+    char_count      INTEGER,
+    first_seen      TEXT,
+    last_seen       TEXT,
+    retention_until TEXT               -- Jay's directive (2026-09-07): keep every RFP/grant
+                                        -- regardless of score, for a retention window (default
+                                        -- ~2 years, ARCHIVE_RETENTION_DAYS env-overridable) --
+                                        -- metadata only for now, no auto-delete job yet.
+);
+
 CREATE INDEX IF NOT EXISTS idx_opp_win   ON opportunities(win_probability DESC);
 CREATE INDEX IF NOT EXISTS idx_opp_run   ON opportunities(last_run_id);
 CREATE INDEX IF NOT EXISTS idx_runs_time ON runs(started_at DESC);
@@ -229,6 +242,32 @@ def insert_run(conn: sqlite3.Connection, run: dict) -> int:
     return cur.lastrowid
 
 
+def get_opportunity_by_link(conn: sqlite3.Connection, link: str) -> dict | None:
+    """Look up a previously-scored opportunity by link, or None if never seen.
+
+    Basis for the delta pipeline (Jay's directive, 2026-09-07): main.py checks
+    this before paying for a document fetch + LLM score. `opportunities` already
+    accumulates one row per link across every run (see upsert_opportunity),
+    first_seen preserved -- no new table needed just to know "have we seen this."
+    """
+    row = conn.execute("SELECT * FROM opportunities WHERE link = ?", (link,)).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_opportunity_document(conn: sqlite3.Connection, doc: dict) -> None:
+    """Insert or refresh a raw-text archive row, keyed on link. See observatory/archive.py."""
+    cols = ["link", "content_hash", "raw_text_path", "char_count",
+            "first_seen", "last_seen", "retention_until"]
+    update_cols = [c for c in cols if c not in ("link", "first_seen")]
+    set_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+    placeholders = ", ".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO opportunity_documents ({', '.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(link) DO UPDATE SET {set_clause}",
+        [doc.get(c) for c in cols],
+    )
+
+
 def upsert_opportunity(conn: sqlite3.Connection, opp: dict, run_id: int, seen_at: str) -> None:
     """Insert or update an opportunity keyed on its link.
 
@@ -277,11 +316,48 @@ def upsert_corpus_doc(conn: sqlite3.Connection, doc: dict) -> None:
 
     Used by the govinfo / FAR / DFARS / EO ingest (arc #3) and read by the
     ORACLE agents (arc #4).
+
+    2026-09-06 fix: ingest.py's fetch_* functions write cheap metadata rows with
+    text="" (or, for EOs, Federal Register's often-empty `abstract`) -- the real
+    body is filled later, lazily, by fulltext.py's separate rate-limited pass.
+    Before this fix, text=excluded.text unconditionally overwrote on conflict,
+    so once scheduling re-runs ingest on a cron, any text fulltext.fill() had
+    already backfilled would get silently wiped back to empty on the next sweep
+    (embedded flag too, along with it -- see below). Never let a re-ingest
+    replace non-empty text with empty; a later fulltext.fill() pass can still
+    overwrite text going the other way (empty -> real body).
+
+    2026-09-07 fix: the embedded guard above was too blunt -- "once embedded=1,
+    stay 1 forever" also blocked a legitimate re-embed when text genuinely
+    *changes* to different non-empty content (e.g. observatory.ingest.
+    fetch_ecfr_title48 refreshing a FAR/DFARS row that was previously ingested
+    text-empty from the annual-CFR path, or a future amendment). Corrected:
+    embedded resets to 0 whenever incoming text is non-empty AND differs from
+    what's already stored -- so a real content change is picked up by the next
+    embed_corpus.py run, while an empty/unchanged incoming text still can't
+    clobber a good embedded=1 row.
     """
     cols = ["source", "collection", "citation", "title", "url",
             "published", "fetched_at", "text", "embedded", "meta_json"]
     update_cols = [c for c in cols if c not in ("source", "citation")]
-    set_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+    set_clause_parts = []
+    for c in update_cols:
+        if c == "text":
+            set_clause_parts.append(
+                "text = CASE WHEN excluded.text = '' OR excluded.text IS NULL "
+                "THEN corpus_docs.text ELSE excluded.text END"
+            )
+        elif c == "embedded":
+            set_clause_parts.append(
+                "embedded = CASE "
+                "WHEN excluded.text IS NOT NULL AND excluded.text != '' "
+                "     AND excluded.text != corpus_docs.text THEN 0 "
+                "WHEN corpus_docs.embedded = 1 THEN 1 "
+                "ELSE excluded.embedded END"
+            )
+        else:
+            set_clause_parts.append(f"{c}=excluded.{c}")
+    set_clause = ", ".join(set_clause_parts)
     placeholders = ", ".join("?" for _ in cols)
     conn.execute(
         f"INSERT INTO corpus_docs ({', '.join(cols)}) VALUES ({placeholders}) "

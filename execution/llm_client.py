@@ -23,17 +23,26 @@ LM Studio removal). Now hits Ollama's NATIVE /api/chat directly (same
 precedent as observatory/embed_corpus.py's embedding calls) rather than the
 OpenAI-compat shim, specifically so the resource caps below are reliably
 honored rather than hoped-for through a compatibility layer:
-  - num_gpu=24 (of gemma4:12b's 48 layers -- 50%), num_thread=~50% of logical
-    cores. Jay's standing rule as of 2026-08-11: he's since gone back through
-    the physical hardware himself and confirmed it; cap both CPU and GPU at
-    50% and otherwise run normally, don't add extra caution beyond the cap.
-    History for context (see [[hardware-crash-under-local-compute]]): the box
-    hard-crashed under sustained local inference in both GPU (15-20 min) and
-    CPU-only (40 min) modes on 2026-06-30, and separately an RX580
-    display-driver TDR was root-caused on 2026-06-21 (GPU offload contends
-    with the display driver since the RX580 is this box's sole display GPU).
-    Both were live concerns until Jay's hardware pass; the 50% cap is the
-    current standing rule, not a substitute for it.
+  - num_gpu=31 (of gemma4:12b's 48 layers -- 65%), num_thread=~65% of logical
+    cores. History same day (2026-08-30): 50% ran clean (sequential, zero
+    crash/TDR) after the CPU fan replacement + GTX760 display-offload +
+    GGML_VK_VISIBLE_DEVICES=1 fix (see [[hardware-crash-under-local-compute]]
+    for the full 08-24/08-29/08-30 retest history). Raised to 85% -> produced
+    a real amdwddmg TDR (event 4101) ~14min into a SEQUENTIAL-ONLY test, no
+    concurrency involved, and generation output silently degraded (fast,
+    truncated) for the rest of the run without the API erroring -- worse than
+    a clean failure, since a caller would trust the bad output. Dropped to
+    65% as a deliberate midpoint, not yet validated. Also notable: the TDR
+    happened on compute-only load (GTX760 handles display now) -- the
+    original "RX580=display-GPU=TDR-risk" theory was incomplete; heavy
+    Vulkan compute alone can still trigger amdwddmg. The concurrent-load test
+    for the separate suspected PSU/power-delivery mechanism still hasn't been
+    re-run since the hardware fixes -- don't conflate the two failure modes.
+  - timeout=450s (was 180s, raised same session): the original 180s ceiling
+    was cutting off legitimate slow generations under the 50% cap, not actual
+    hangs -- one successful 847-char response took 176s, right at the old
+    edge. 3 of 8 sequential test calls failed this way before the fix; that
+    was a timeout-too-short bug, not a hardware/GPU stability finding.
 """
 
 import os
@@ -49,13 +58,16 @@ LOCAL_BASE_URL     = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434")
 VENICE_BASE_URL    = "https://api.venice.ai/api/v1"
 LLM_MODE           = os.getenv("LLM_MODE", "auto").lower()
 
-# Jay's 2026-08-11 standing rule: local compute capped at 50% CPU and 50% GPU
-# (see module docstring). 24 = half of gemma4:12b's 48 layers -- recompute if
-# the local model changes (`ollama show <model>` -> model_info block_count).
-# Override via env if the box's core count or the rule itself changes; do not
-# silently raise either cap.
-LOCAL_CPU_THREAD_CAP = int(os.getenv("LOCAL_CPU_THREAD_CAP", max(1, (os.cpu_count() or 2) // 2)))
-LOCAL_NUM_GPU = int(os.getenv("LOCAL_NUM_GPU", "24"))
+# Jay's 2026-08-30 65%-CPU/GPU cap (LOCAL_NUM_GPU=31, [[hardware-crash-under-local-compute]])
+# was a response to a real amdwddmg TDR crash on RAZZOR-FACCE's RX580 under sustained
+# local generation -- that's the old Taichi X370 box's discrete GPU. 2026-09:
+# migrated to the primordial-galaxy node, which has no discrete GPU at all (Intel
+# UHD 630 integrated only) -- the TDR failure mode this cap guarded against doesn't
+# exist on this hardware, so the throttle is lifted here. Unset (None) -> the key
+# is omitted from the request options below so Ollama auto-tunes; set either env
+# var to a positive int to force a specific cap again if a future box needs it.
+LOCAL_CPU_THREAD_CAP = int(os.environ["LOCAL_CPU_THREAD_CAP"]) if os.getenv("LOCAL_CPU_THREAD_CAP") else None
+LOCAL_NUM_GPU = int(os.environ["LOCAL_NUM_GPU"]) if os.getenv("LOCAL_NUM_GPU") else None
 
 # Last provider that successfully served a completion, e.g. "local (gemma4:12b)".
 # Read via get_last_provider() so callers can report the actual serving tier.
@@ -82,7 +94,7 @@ def _local_available() -> bool:
         return False
 
 
-def _try_local(prompt: str, system: str | None, mode: str) -> str | None:
+def _try_local(prompt: str, system: str | None, mode: str, json_mode: bool = False) -> str | None:
     try:
         import requests
         model = LOCAL_MODEL_PRECISE if mode == "precise" else LOCAL_MODEL_FAST
@@ -90,25 +102,41 @@ def _try_local(prompt: str, system: str | None, mode: str) -> str | None:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
+        options = {}
+        if LOCAL_NUM_GPU is not None:
+            options["num_gpu"] = LOCAL_NUM_GPU
+        if LOCAL_CPU_THREAD_CAP is not None:
+            options["num_thread"] = LOCAL_CPU_THREAD_CAP
         payload = {
             "model": model,
             "messages": messages,
             "stream": False,
-            "options": {"num_gpu": LOCAL_NUM_GPU, "num_thread": LOCAL_CPU_THREAD_CAP},
+            "options": options,
         }
-        resp = requests.post(f"{LOCAL_BASE_URL}/api/chat", json=payload, timeout=180)
+        if json_mode:
+            # 2026-09-06 fix: a live 65-item pipeline run found 7/65 (11%) of scoring
+            # calls silently degrading to the keyword-fallback placeholder path, all
+            # from the identical "Expecting ',' delimiter" json.loads error -- the
+            # small local model (gemma4:e2b) occasionally emits an unescaped quote
+            # inside a JSON string field. Prompt instructions ("output strictly valid
+            # JSON") only make this less likely; Ollama's grammar-constrained decoding
+            # (this flag) makes malformed JSON structurally impossible instead of just
+            # less probable -- it's the actual fix, not a retry/repair band-aid.
+            payload["format"] = "json"
+        resp = requests.post(f"{LOCAL_BASE_URL}/api/chat", json=payload, timeout=450)
         resp.raise_for_status()
         text = resp.json()["message"]["content"].strip()
         global LAST_PROVIDER
         LAST_PROVIDER = f"local ({model})"
-        print(f"    [LLM] local ({model}, num_gpu={LOCAL_NUM_GPU}, num_thread={LOCAL_CPU_THREAD_CAP})")
+        cap_note = f", num_gpu={LOCAL_NUM_GPU}, num_thread={LOCAL_CPU_THREAD_CAP}" if options else ", uncapped"
+        print(f"    [LLM] local ({model}{cap_note})")
         return text
     except Exception as e:
         print(f"    [LLM] local failed: {e}")
         return None
 
 
-def _try_venice(prompt: str, system: str | None, mode: str) -> str | None:
+def _try_venice(prompt: str, system: str | None, mode: str, json_mode: bool = False) -> str | None:
     if not VENICE_API_KEY:
         return None
     try:
@@ -119,11 +147,12 @@ def _try_venice(prompt: str, system: str | None, mode: str) -> str | None:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=4096,
-        )
+        kwargs = {"model": model, "messages": messages, "max_tokens": 4096}
+        if json_mode:
+            # Same fix as _try_local's format="json" -- OpenAI-compatible constrained
+            # decoding, so a Venice-served call gets the same JSON-validity guarantee.
+            kwargs["response_format"] = {"type": "json_object"}
+        response = client.chat.completions.create(**kwargs)
         text = response.choices[0].message.content.strip()
         global LAST_PROVIDER
         LAST_PROVIDER = f"venice ({model})"
@@ -160,34 +189,43 @@ def get_last_provider() -> str | None:
     return LAST_PROVIDER
 
 
-def complete(prompt: str, system: str | None = None, mode: str = "fast") -> str | None:
+def complete(prompt: str, system: str | None = None, mode: str = "fast",
+             json_mode: bool = False) -> str | None:
     """
     Send a prompt through the provider cascade and return the raw text response.
 
     Args:
-        prompt:  User message content.
-        system:  Optional system prompt.
-        mode:    "fast" (bulk) or "precise" (legal drafting).
+        prompt:    User message content.
+        system:    Optional system prompt.
+        mode:      "fast" (bulk) or "precise" (legal drafting).
+        json_mode: True forces grammar-constrained JSON output on local (Ollama
+                   format="json") and Venice (OpenAI-compat response_format).
+                   Pass True for every JSON-schema caller (gemini_analyst,
+                   antibody_agent, red_team_simulation) -- prompt instructions
+                   alone ("output strictly valid JSON") only make malformed JSON
+                   less likely; this makes it structurally impossible on the
+                   tiers that support it. Leave False for prose callers (aaas_poc).
+                   Anthropic has no equivalent flag here; unaffected either way.
 
     Returns:
         Raw text string, or None if all providers fail.
     """
     if LLM_MODE == "local":
-        return _try_local(prompt, system, mode)
+        return _try_local(prompt, system, mode, json_mode)
 
     if LLM_MODE == "venice":
-        return _try_venice(prompt, system, mode)
+        return _try_venice(prompt, system, mode, json_mode)
 
     if LLM_MODE == "anthropic":
         return _try_anthropic(prompt, system)
 
     # auto — full cascade
     if _local_available():
-        result = _try_local(prompt, system, mode)
+        result = _try_local(prompt, system, mode, json_mode)
         if result:
             return result
 
-    result = _try_venice(prompt, system, mode)
+    result = _try_venice(prompt, system, mode, json_mode)
     if result:
         return result
 

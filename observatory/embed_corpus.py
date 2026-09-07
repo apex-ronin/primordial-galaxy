@@ -13,7 +13,7 @@ Served via Ollama (localhost:11434, OpenAI-compat /v1/embeddings) as of 2026-08-
 LM Studio was removed from the box (crash-prone Electron GUI); same model, same
 dims, just a stable headless server. `ollama pull nomic-embed-text` before running.
 
-Writes:  G:\\AI-Models\\indexes\\corpus_docs.faiss + corpus_docs_meta.jsonl,
+Writes:  $RONIN_INDEX_DIR/corpus_docs.faiss + corpus_docs_meta.jsonl,
          adds a "corpus_docs" entry to index_manifest.json,
          flips corpus_docs.embedded = 1 for every embedded row.
 
@@ -27,14 +27,26 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import time
 from pathlib import Path
 
 import faiss
 import numpy as np
 import requests
+from dotenv import load_dotenv
 
 from . import db
+
+# 2026-09-07 fix: this module never loaded .env, so RONIN_INDEX_DIR below always
+# fell back to the literal default -- on Linux, r"G:\AI-Models\indexes" isn't a
+# UNC-style path, it's a legal (if odd) single directory name, so every run
+# silently wrote a full, real-looking index into ./G:\AI-Models\indexes/ under
+# the CWD instead of the actual configured index dir. Confirmed live: today's
+# EO full-text fix and eCFR FAR/DFARS refresh both "succeeded" straight into
+# that throwaway directory while antibody_agent.py (which does call
+# load_dotenv()) kept reading the real, stale 2026-08-10 index the whole time.
+load_dotenv()
 
 EMBED_URL = "http://localhost:11434/api/embed"
 EMBED_MODEL = "nomic-embed-text"
@@ -50,7 +62,7 @@ MAX_RETRIES = 5
 MAX_CHARS = 6000  # nomic context is ~2k tokens; cap long clauses before embedding
 MAX_META_CHARS = 1500  # clause_text stored inline in meta for the antibody oracle (retrieve wide, feed thin)
 
-INDEX_DIR = Path(r"G:\AI-Models\indexes")
+INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", r"G:\AI-Models\indexes"))
 NAME = "corpus_docs"
 
 
@@ -127,7 +139,7 @@ def build(limit: int | None = None) -> dict:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     manifest[NAME] = {
         "embedder": EMBED_MODEL,
-        "embedder_serving": "Ollama /v1/embeddings (localhost:11434)",
+        "embedder_serving": "Ollama /api/embed (localhost:11434)",
         "dimensions": EMBED_DIMS,
         "metric": "cosine (L2-normalized IndexFlatIP)",
         "doc_prefix": DOC_PREFIX,
