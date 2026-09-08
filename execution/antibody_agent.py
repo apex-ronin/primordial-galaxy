@@ -30,7 +30,7 @@ CORPUS_DIR = os.path.join(BASE_DIR, "data", "legal_corpus")
 # native /api/embed (not the OpenAI-compat /v1/embeddings LM Studio used --
 # LOCAL_LLM_BASE_URL is bare post-2026-08-10 rewire since llm_client.py's chat
 # calls need it bare too; matches observatory/embed_corpus.py's convention).
-INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", r"G:\AI-Models\indexes"))
+INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", str(Path.home() / "pg" / "models" / "indexes")))
 EMBED_URL = os.environ.get(
     "LOCAL_LLM_BASE_URL", "http://localhost:11434"
 ).rstrip("/") + "/api/embed"

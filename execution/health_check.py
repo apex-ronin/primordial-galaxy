@@ -21,7 +21,7 @@ CORPUS_DIR = os.path.join(BASE_DIR, "data", "legal_corpus")
 
 # Local nomic-embed FAISS retrieval (mirrors antibody_agent / prism_tools config).
 # Ollama native /api/embed, not OpenAI-compat /v1/embeddings -- see antibody_agent.py.
-INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", r"G:\AI-Models\indexes"))
+INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", str(Path.home() / "pg" / "models" / "indexes")))
 EMBED_URL = os.environ.get(
     "LOCAL_LLM_BASE_URL", "http://localhost:11434"
 ).rstrip("/") + "/api/embed"

@@ -62,7 +62,7 @@ MAX_RETRIES = 5
 MAX_CHARS = 6000  # nomic context is ~2k tokens; cap long clauses before embedding
 MAX_META_CHARS = 1500  # clause_text stored inline in meta for the antibody oracle (retrieve wide, feed thin)
 
-INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", r"G:\AI-Models\indexes"))
+INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", str(Path.home() / "pg" / "models" / "indexes")))
 NAME = "corpus_docs"
 
 
