@@ -1,0 +1,29 @@
+name: Public-safe guard
+
+# Blocks any PR or push into main from carrying private-commercial-layer
+# content (see .github/scripts/check_public_safe.py) — but only inside the
+# public mirror. The `if:` below is what makes that split real: this same
+# workflow file also exists on jsnnlsn-prog/primordial-galaxy (it's the same
+# main branch), and there it's a no-op, so the private mirror keeps carrying
+# the full corpus/Heartland code with no interference.
+#
+# This check only matters if direct pushes to main are disabled on
+# apex-ronin/primordial-galaxy (Settings > Branches > main > require a pull
+# request before merging, require this check to pass, no bypass for admins).
+# Without that, this workflow reports failures but can't stop a push.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check-public-safe:
+    if: github.repository == 'apex-ronin/primordial-galaxy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for private-layer content
+        run: python3 .github/scripts/check_public_safe.py

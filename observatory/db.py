@@ -3,13 +3,19 @@
 One file, no server, no cloud. Lives at <repo>/data/primordial.db (gitignored as
 runtime data — it is fully regenerable from opportunities.json + scan logs).
 
-Three tables:
-  runs          — one row per scanner run: when, how long, status, per-source
-                  counts, which LLM tier actually served, errors, log path.
-  opportunities — deduped by link; carries the full scored record plus
-                  first_seen / last_seen so the dashboard can show history/trend.
-  corpus_docs   — the knowledge store the ORACLE agents draw on (govinfo, FAR,
-                  DFARS, EOs, GAO/IG fraud cases). Deduped by (source, citation).
+Four tables:
+  runs                — one row per scanner run: when, how long, status,
+                        per-source counts, which LLM tier actually served,
+                        errors, log path.
+  opportunities       — deduped by link; carries the full scored record plus
+                        first_seen / last_seen so the dashboard can show
+                        history/trend.
+  corpus_docs         — the knowledge store the ORACLE agents draw on (govinfo,
+                        FAR, DFARS, EOs, GAO/IG fraud cases). Deduped by
+                        (source, citation).
+  opportunity_documents — raw-text archive of every fetched RFP/grant page,
+                        keyed on link, kept for a retention window regardless
+                        of score (metadata only for now, no auto-delete job).
 """
 
 from __future__ import annotations
@@ -83,6 +89,19 @@ CREATE TABLE IF NOT EXISTS corpus_docs (
     embedded    INTEGER DEFAULT 0,
     meta_json   TEXT,
     UNIQUE(source, citation)
+);
+
+CREATE TABLE IF NOT EXISTS opportunity_documents (
+    link            TEXT PRIMARY KEY,  -- same key as opportunities.link
+    content_hash    TEXT,              -- sha256 of raw_text, detects a re-posted/amended link
+    raw_text_path   TEXT,              -- path under data/opportunity_archive/, full fetched text
+    char_count      INTEGER,
+    first_seen      TEXT,
+    last_seen       TEXT,
+    retention_until TEXT               -- keep every RFP/grant regardless of score, for a
+                                        -- retention window (default ~2 years,
+                                        -- ARCHIVE_RETENTION_DAYS env-overridable) --
+                                        -- metadata only for now, no auto-delete job yet.
 );
 
 CREATE INDEX IF NOT EXISTS idx_opp_win   ON opportunities(win_probability DESC);
@@ -187,6 +206,32 @@ def upsert_opportunity(conn: sqlite3.Connection, opp: dict, run_id: int, seen_at
         f"INSERT INTO opportunities ({', '.join(cols)}) VALUES ({placeholders}) "
         f"ON CONFLICT(link) DO UPDATE SET {set_clause}",
         values,
+    )
+
+
+def get_opportunity_by_link(conn: sqlite3.Connection, link: str) -> dict | None:
+    """Look up a previously-scored opportunity by link, or None if never seen.
+
+    Basis for the delta pipeline: main.py checks this before paying for a
+    document fetch + LLM score. `opportunities` already accumulates one row
+    per link across every run (see upsert_opportunity), first_seen preserved
+    -- no new table needed just to know "have we seen this."
+    """
+    row = conn.execute("SELECT * FROM opportunities WHERE link = ?", (link,)).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_opportunity_document(conn: sqlite3.Connection, doc: dict) -> None:
+    """Insert or refresh a raw-text archive row, keyed on link. See observatory/archive.py."""
+    cols = ["link", "content_hash", "raw_text_path", "char_count",
+            "first_seen", "last_seen", "retention_until"]
+    update_cols = [c for c in cols if c not in ("link", "first_seen")]
+    set_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+    placeholders = ", ".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO opportunity_documents ({', '.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(link) DO UPDATE SET {set_clause}",
+        [doc.get(c) for c in cols],
     )
 
 

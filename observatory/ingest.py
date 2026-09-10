@@ -61,7 +61,8 @@ def _get_json(url: str, timeout: int = 30) -> dict:
 def fetch_executive_orders(limit: int = 25) -> list[dict]:
     """Newest `limit` Executive Orders as corpus_doc dicts."""
     fields = ["executive_order_number", "title", "signing_date",
-              "document_number", "html_url", "publication_date", "abstract"]
+              "document_number", "html_url", "publication_date", "abstract",
+              "raw_text_url"]
     params = [
         ("conditions[presidential_document_type]", "executive_order"),
         ("order", "newest"),
@@ -84,9 +85,12 @@ def fetch_executive_orders(limit: int = 25) -> list[dict]:
             "url": r.get("html_url"),
             "published": r.get("signing_date") or r.get("publication_date"),
             "fetched_at": fetched_at,
-            "text": r.get("abstract") or "",  # full text fetched on demand by ORACLE
+            "text": r.get("abstract") or "",  # cheap row; real body filled by fulltext.py
             "embedded": 0,
-            "meta_json": json.dumps({"document_number": r.get("document_number")}),
+            "meta_json": json.dumps({
+                "document_number": r.get("document_number"),
+                "raw_text_url": r.get("raw_text_url"),
+            }),
         })
     return docs
 
@@ -204,6 +208,79 @@ def fetch_title48(vol: int = 2, section: str = "sec52", source: str = "far",
             "text": "",  # full text filled on demand via the granule htm endpoint
             "embedded": 0,
             "meta_json": json.dumps({"granuleId": gid, "package": pid, "vol": vol}),
+        })
+        if limit and len(docs) >= limit:
+            break
+    return docs
+
+
+# ---------------------------------------------------------------------------
+# FAR / DFARS (eCFR — continuously current, not the annual CFR snapshot)
+# ---------------------------------------------------------------------------
+#
+# 2026-09-07 fix (Jay's "keep every rule current" directive): fetch_title48()
+# above pins to an ANNUAL CFR edition (CFR-{year}-title48-vol{vol}) -- stale by
+# up to a year depending on when in the year it's pulled. eCFR is govinfo's
+# continuously-updated version (this file's own AMDDATE was days old when
+# checked). Also fixes a real, separate gap found in the process: DFARS raw
+# text has never actually been ingested into corpus_docs at all (only `eo`,
+# `far`, `far_rfo`, `gao` sources existed) despite fetch_title48 nominally
+# supporting source="dfars" -- nobody had run it.
+#
+# Structural tradeoff vs. fetch_title48: eCFR has no per-clause granule
+# endpoint (confirmed live: ECFR-title48's /granules returns 0 rows) -- the
+# whole ~1,550-section, 20MB Title 48 ships as one bulk XML file instead. That
+# actually simplifies things here: the full clause text is already present in
+# this one download, so unlike fetch_title48 (which leaves text="" for a
+# separate fulltext.py pass per clause), this ingests populated, embedding-
+# ready text directly -- no fulltext-fill step needed for far/dfars going
+# forward.
+
+ECFR_TITLE48_URL = "https://www.govinfo.gov/bulkdata/ECFR/title-48/ECFR-title48.xml"
+
+
+def fetch_ecfr_title48(part_prefix: str = "52", source: str = "far",
+                        limit: int | None = None) -> list[dict]:
+    """Current FAR/DFARS clauses from eCFR's bulk Title 48 XML, text included.
+
+    part_prefix: "52" for FAR Part 52 (contract clauses), "252" for DFARS
+    Part 252 -- matched against each SECTION element's N attribute prefix
+    (e.g. "52.204-21" starts with "52.").
+    """
+    import xml.etree.ElementTree as ET
+    import urllib.request as _ur
+
+    req = _ur.Request(ECFR_TITLE48_URL, headers=_UA)
+    with _ur.urlopen(req, timeout=180) as resp:
+        root = ET.parse(resp).getroot()
+
+    label = {"far": "FAR", "dfars": "DFARS"}.get(source, source.upper())
+    amd_date_el = root.find(".//AMDDATE")
+    amd_date = (amd_date_el.text or "").strip() if amd_date_el is not None else None
+    fetched_at = datetime.now().isoformat()
+    needle = f"{part_prefix}."
+
+    docs = []
+    for sec in root.findall('.//DIV8[@TYPE="SECTION"]'):
+        n = sec.get("N") or ""
+        if not n.startswith(needle):
+            continue
+        head_el = sec.find("HEAD")
+        head = (head_el.text or "").strip() if head_el is not None else ""
+        # HEAD is "52.204-21   Basic Safeguarding..." -- drop the leading number.
+        title = head.split(None, 1)[1].strip() if len(head.split(None, 1)) > 1 else head
+        text = " ".join("".join(sec.itertext()).split())
+        docs.append({
+            "source": source,
+            "collection": "ECFR",
+            "citation": f"{label} {n}",
+            "title": title or None,
+            "url": f"https://www.ecfr.gov/current/title-48/section-{n}",
+            "published": amd_date,
+            "fetched_at": fetched_at,
+            "text": text,
+            "embedded": 0,
+            "meta_json": json.dumps({"ecfr_amd_date": amd_date}),
         })
         if limit and len(docs) >= limit:
             break
@@ -343,6 +420,11 @@ def main() -> None:
                        help='comma-separated FAR parts, e.g. "3,9,15,19,52", or "all"')
     p_rfo.add_argument("--limit", type=int, default=None)
 
+    p_ecfr = sub.add_parser("ecfr", help="FAR/DFARS clauses, current text, from eCFR bulk Title 48 XML")
+    p_ecfr.add_argument("--part", default="52", help='CFR part prefix: "52"=FAR Part 52, "252"=DFARS Part 252')
+    p_ecfr.add_argument("--source", default="far", choices=["far", "dfars"])
+    p_ecfr.add_argument("--limit", type=int, default=None)
+
     args = ap.parse_args()
     if args.cmd == "eo":
         docs = fetch_executive_orders(args.limit)
@@ -352,6 +434,8 @@ def main() -> None:
         docs = fetch_title48(args.vol, args.section, args.source, args.year, args.limit)
     elif args.cmd == "rfo":
         docs = fetch_far_rfo(args.parts, args.limit)
+    elif args.cmd == "ecfr":
+        docs = fetch_ecfr_title48(args.part, args.source, args.limit)
     else:  # pragma: no cover
         ap.error("unknown command")
 

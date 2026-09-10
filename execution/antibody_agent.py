@@ -25,12 +25,15 @@ CORPUS_DIR = os.path.join(BASE_DIR, "data", "legal_corpus")
 
 # --- Semantic retrieval config (mirrors ronin/app/agents/prism_tools.py) ---
 # Local nomic-embed FAISS index built by data-arsenal/pipeline/build_local_indexes.py.
-# Sovereign: no network beyond localhost LM Studio, no GCP. Index dir overridable
-# via RONIN_INDEX_DIR; query embedder served at LOCAL_LLM_BASE_URL.
-INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", r"G:\AI-Models\indexes"))
+# Sovereign: no network beyond localhost Ollama, no GCP. Index dir overridable
+# via RONIN_INDEX_DIR; query embedder served at LOCAL_LLM_BASE_URL via Ollama's
+# native /api/embed (not the OpenAI-compat /v1/embeddings LM Studio used --
+# LOCAL_LLM_BASE_URL is bare post-2026-08-10 rewire since llm_client.py's chat
+# calls need it bare too; matches observatory/embed_corpus.py's convention).
+INDEX_DIR = Path(os.environ.get("RONIN_INDEX_DIR", str(Path.home() / "pg" / "models" / "indexes")))
 EMBED_URL = os.environ.get(
-    "LOCAL_LLM_BASE_URL", "http://localhost:1234/v1"
-).rstrip("/") + "/embeddings"
+    "LOCAL_LLM_BASE_URL", "http://localhost:11434"
+).rstrip("/") + "/api/embed"
 LEGAL_INDEX = "legal_corpus"
 CORPUS_INDEX = "corpus_docs"
 # Searched together and merged by cosine score (Jay's call: keep the curated
@@ -77,7 +80,7 @@ def _embed_query(vector: str):
         "input": [entry["query_prefix"] + vector],
     }, timeout=120)
     resp.raise_for_status()
-    vec = np.array([resp.json()["data"][0]["embedding"]], dtype=np.float32)
+    vec = np.array([resp.json()["embeddings"][0]], dtype=np.float32)
     faiss.normalize_L2(vec)
     return vec
 
@@ -246,6 +249,30 @@ def _score_specificity(clause_text: str, grounded: bool) -> Tuple[int, Dict[str,
     return sum(breakdown.values()), breakdown
 
 
+# --- Vector-specific drafting guidance ---
+# Ported from red_team_simulation.py's TASK 2 prompt (2026-09-06 finding: that
+# prompt drafted a full immune_system_antibody clause with this same guidance,
+# but the draft was discarded -- run_batch() never reads it, only
+# antibody_agent.generate()'s (weaker, generic) draft was scored/saved. Rather
+# than pay for two drafting calls, red_team_simulation.py's TASK 2 was removed
+# and its guidance moved here, into the one prompt that's actually scored.
+_VECTOR_GUIDANCE = {
+    "outsourc": "Require named individuals, live human-in-the-loop verification sessions, background checks, and geo-verified login telemetry.",
+    "gig": "Require named individuals, live human-in-the-loop verification sessions, background checks, and geo-verified login telemetry.",
+    "billing": "Convert to milestone/outcome-based payment, require pre-approved hour caps per deliverable, and mandate auditable work logs (screenshots/commits/timestamps).",
+    "phish": "Mandate hardware MFA for all contract communications, require out-of-band phone verification for any payment/credential change, and whitelist-only email domains.",
+    "template": "Require live, unscripted deliverable walkthroughs and version-control history that predates the deliverable deadline, not just a finished artifact.",
+}
+
+
+def _vector_guidance(vector: str) -> str:
+    v = (vector or "").lower()
+    for key, guidance in _VECTOR_GUIDANCE.items():
+        if key in v:
+            return guidance
+    return "Name the exact verification mechanism appropriate to this specific vector -- not generic boilerplate."
+
+
 def generate(opportunity: Dict[str, Any], threat_assessment: Dict[str, Any]) -> Dict[str, Any]:
     """
     The main interface for the Antibody Agent. Implements Session B Pipeline.
@@ -254,7 +281,15 @@ def generate(opportunity: Dict[str, Any], threat_assessment: Dict[str, Any]) -> 
     validation_status, and economic_calibration.
     """
     vector = threat_assessment.get("primary_vector", "General Fraud")
-    roi_multiplier = threat_assessment.get("cost_of_fraud_roi", {}).get("roi_multiplier", 5)
+    cost_of_fraud = threat_assessment.get("cost_of_fraud_roi", {}) or {}
+    roi_multiplier = cost_of_fraud.get("roi_multiplier", 5)
+    # Raw dollar figures for the real economic-calibration gate below (2026-09-06 fix:
+    # the old gate compared specificity_score/10 -- a 0-10 enforceability proxy -- against
+    # roi_multiplier -- a payout/cost ratio that's ~50x by construction for any contract
+    # over $50k (red_team_simulation.py's estimated_attacker_cost is a flat 2% of payout).
+    # Those are different units; the comparison could never pass. Fixed dollar-for-dollar below.
+    estimated_attacker_cost = cost_of_fraud.get("estimated_attacker_cost_usd", 1000)
+    estimated_payout = cost_of_fraud.get("estimated_payout_usd", 50000)
     title = opportunity.get("title", "Unknown Project")
 
     # 1. Retrieval Gate — local semantic corpus (records carry clause ids for grounding)
@@ -295,24 +330,29 @@ def generate(opportunity: Dict[str, Any], threat_assessment: Dict[str, Any]) -> 
     prompt = f"""You are a Specialized Antibody Agent. Draft a high-specificity RFP clause.
 
 THREAT VECTOR: {vector}
-FRAUD ROI: {roi_multiplier}x
+ESTIMATED ATTACKER COST (to execute the fraud, before this clause): ${estimated_attacker_cost:,}
+ESTIMATED FRAUD PAYOUT: ${estimated_payout:,}
 OPPORTUNITY: {title}
 
 LEGAL CORPUS CONTEXT (use terminology from these where applicable):
 {corpus_context}
 
+VECTOR-SPECIFIC MECHANISM (use this, don't invent a generic one): {_vector_guidance(vector)}
+
 CRITERIA:
 - Must be a 'Procurement Shield' clause.
-- Specificity over boilerplate: mention concrete verification steps (e.g. bi-weekly live screenings).
-- Economic Burden: verification cost must break the {roi_multiplier}x ROI.
+- Specificity over boilerplate: name a concrete verification mechanism AND cadence (e.g. bi-weekly live screenings), not "provide documentation."
+- Named enforcement actor: the clause must name WHO verifies/enforces it (e.g. Contracting Officer's Representative, an independent third-party assessor/C3PAO, DCAA, or SPRS reporting) — not an unspecified "third party."
+- Consequence: name a concrete, enforceable consequence for non-compliance (termination, payment withholding, liquidated damages, debarment referral).
 - M-26-04 Compliance Wedge (mandatory if LLM context): vendor must disclose AUP, model/data cards, feedback mechanism, and adhere to 72-hour incident reporting.
 
 Return ONLY valid JSON — no markdown, no backticks:
 {{
     "clause_title": "string",
-    "clause_text": "3-5 sentences",
+    "clause_text": "3-5 sentences, must name the verification mechanism, cadence, enforcement actor, and consequence",
     "far_reference": "Specific FAR/CA clause number from context if available",
-    "rationale": "Why this blocks {vector}"
+    "rationale": "Why this blocks {vector}",
+    "estimated_compliance_evasion_cost_usd": "Your best-faith integer estimate of what it would cost the attacker to FAKE compliance with this exact clause (staffing look-alikes, falsifying logs, etc.) -- not the cost of legitimately complying"
 }}
 
 DEI COMPLIANCE (Non-negotiable): Focus ONLY on qualifications, experience, and efficiency. \
@@ -324,6 +364,7 @@ Do NOT use race, ethnicity, or identity-based metrics. Compliance is material to
             prompt,
             system="You are a JSON-only API. Output strictly valid JSON. No markdown, no code blocks, no backticks.",
             mode="precise",
+            json_mode=True,
         )
         if not raw:
             return _emergency_failsafe(vector)
@@ -347,6 +388,19 @@ Do NOT use race, ethnicity, or identity-based metrics. Compliance is material to
         grounded = _is_grounded(far_reference or "", corpus_ids)
         specificity_score, specificity_breakdown = _score_specificity(clause_text, grounded)
 
+        # Real dollar-for-dollar economic calibration (2026-09-06 fix — see note above
+        # generate()'s body). The clause is "ENFORCED" only if it actually pushes the
+        # attacker's total cost (original fraud cost + cost to fake compliance with
+        # THIS clause) above what the fraud would have paid out — i.e. fraud is no
+        # longer profitable once this clause exists, not merely "the clause sounds strict."
+        raw_evasion_cost = draft.get("estimated_compliance_evasion_cost_usd", 0)
+        try:
+            evasion_cost = max(0, int(float(raw_evasion_cost)))
+        except (TypeError, ValueError):
+            evasion_cost = 0
+        total_attacker_cost = estimated_attacker_cost + evasion_cost
+        post_clause_roi = round(estimated_payout / max(total_attacker_cost, 1), 2)
+
         return {
             "clause_title": draft.get("clause_title"),
             "clause_text": clause_text,
@@ -356,9 +410,9 @@ Do NOT use race, ethnicity, or identity-based metrics. Compliance is material to
             "grounded": grounded,
             "rationale": draft.get("rationale"),
             "validation_status": "VALIDATED" if (specificity_score >= 75 and grounded) else "NEEDS_REVIEW",
-            "economic_calibration": (
-                "ENFORCED" if (specificity_score / 10) > roi_multiplier else "POTENTIAL_BLEED"
-            ),
+            "estimated_compliance_evasion_cost_usd": evasion_cost,
+            "post_clause_roi_multiplier": post_clause_roi,
+            "economic_calibration": "ENFORCED" if post_clause_roi <= 1.0 else "POTENTIAL_BLEED",
         }
 
     except Exception as e:
