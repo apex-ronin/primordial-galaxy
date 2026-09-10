@@ -25,6 +25,12 @@ Four tables:
                        generated draft. Nothing here ever sends itself --
                        "approved" just means Jay has seen it and the draft is
                        ready for HIM to send from his own email client.
+  procurement_watch  — Direct-source daily crawl pilot (2026-09-10, Jay's
+                       directive): one row per entity_procurement URL,
+                       tracking a content hash so a daily fetch can detect
+                       "this agency's procurement page changed" without
+                       re-parsing every page every day. See
+                       observatory/procurement_watch.py.
 """
 
 from __future__ import annotations
@@ -157,6 +163,25 @@ CREATE TABLE IF NOT EXISTS opportunity_documents (
                                         -- metadata only for now, no auto-delete job yet.
 );
 
+CREATE TABLE IF NOT EXISTS procurement_watch (
+    entity_id           TEXT PRIMARY KEY,  -- FK to entity_procurement.entity_id
+    url                 TEXT,
+    domain              TEXT,
+    content_hash        TEXT,              -- sha256 of fetched body, detects a change since last check
+    robots_allowed      INTEGER,           -- 1 | 0 | NULL(robots.txt fetch itself failed -- treated as skip, not allow)
+    last_status_code    INTEGER,
+    consecutive_errors  INTEGER DEFAULT 0, -- circuit breaker: back off a domain after repeated failures
+    check_count         INTEGER DEFAULT 0,
+    change_count        INTEGER DEFAULT 0,
+    first_checked       TEXT,
+    last_checked        TEXT,
+    last_changed        TEXT,
+    last_error          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_procwatch_domain ON procurement_watch(domain);
+CREATE INDEX IF NOT EXISTS idx_procwatch_changed ON procurement_watch(last_changed DESC);
+
 CREATE INDEX IF NOT EXISTS idx_opp_win   ON opportunities(win_probability DESC);
 CREATE INDEX IF NOT EXISTS idx_opp_run   ON opportunities(last_run_id);
 CREATE INDEX IF NOT EXISTS idx_runs_time ON runs(started_at DESC);
@@ -266,6 +291,28 @@ def upsert_opportunity_document(conn: sqlite3.Connection, doc: dict) -> None:
         f"ON CONFLICT(link) DO UPDATE SET {set_clause}",
         [doc.get(c) for c in cols],
     )
+
+
+def upsert_procurement_watch(conn: sqlite3.Connection, row: dict) -> None:
+    """Insert or refresh a procurement_watch row, keyed on entity_id. See observatory/procurement_watch.py."""
+    cols = ["entity_id", "url", "domain", "content_hash", "robots_allowed",
+            "last_status_code", "consecutive_errors", "check_count", "change_count",
+            "first_checked", "last_checked", "last_changed", "last_error"]
+    update_cols = [c for c in cols if c not in ("entity_id", "first_checked")]
+    set_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+    placeholders = ", ".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO procurement_watch ({', '.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(entity_id) DO UPDATE SET {set_clause}",
+        [row.get(c) for c in cols],
+    )
+
+
+def get_procurement_watch(conn: sqlite3.Connection, entity_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM procurement_watch WHERE entity_id = ?", (entity_id,)
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def upsert_opportunity(conn: sqlite3.Connection, opp: dict, run_id: int, seen_at: str) -> None:
