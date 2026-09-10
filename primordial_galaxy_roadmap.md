@@ -66,26 +66,33 @@
 > to close it out, so check that session's status before assuming any of its open items
 > (git-history purge, forbidden-paths review, scanner_daily.yml fix) are still open.
 
-> **🔴 CRITICAL — do not push `main` to `origin` (2026-09-06):** verified live via
-> GitHub API that `apex-ronin/primordial-galaxy` (public) has exactly one branch,
-> `main`, at commit `041d431` (pre-Heartland), PolyForm Shield 1.0 license,
-> 4-clause sample corpus — the open-core split described in the public README
-> ("full pipeline + sample corpus public; curated clause set, antibody library,
-> fraud→shield linkage stay private commercial layer") **is real and live, but is
-> no longer enforced by anything.** It was originally enforced by a branch named
-> `ops` (tip `82cad27`, 2026-08-05: PolyForm license + sample-corpus commits) that
-> did the curation, but `ops` was merged straight into `main` and every commit
-> since — including all 5 of v19's currently-unpushed local commits, which contain
-> the **full Heartland entity verifier** (`entity_procurement.py`, 636 lines) and
-> `scripts/set_mirror_secrets.ps1` — landed on that same `main` branch that both
-> `origin` (public) and `jsnnlsn` (private) point at. **`git push origin main`
-> right now would publish private/commercial-layer code to the public repo.**
-> Jay's 09-06 call: don't decide the long-term split model yet, just **do not push
-> `main` to `origin` until a model is chosen** — see Open Decisions and WHAT NOT TO
-> DO. (Pushing to `jsnnlsn` alone is not currently blocked by this, only by the
-> separate git-credentials gap below — but confirm the split model before doing
-> even that, since `jsnnlsn`'s `main` need not become identical to whatever
-> eventually goes to `origin`.)
+> **✅ RESOLVED 2026-09-09 — Open Decision #7 (public/private split model): Option A.**
+> `main` = full private history (every commit, including Heartland/commercial-layer
+> work) — pushed to `jsnnlsn` only, never to `origin`. A separate, persistent
+> `public` branch receives only hand-vetted, genuinely-real, unaltered commits
+> (reviewed cherry-pick, not squash) — pushed to `origin` only. Jay's reasoning:
+> the public repo's committed history should be genuine and unaltered — it feeds
+> a planned paper about the actual human-collaborative build process, mistakes
+> included — so squashing/resetting history to fake a clean launch was explicitly
+> rejected. This does NOT require hiding failed/incomplete early work from the
+> public branch, only keeping private-commercial-IP and secrets off it. The
+> `public` branch went live 2026-09-10 (`origin/public` = `041d431` initially,
+> then a real curated content update to `b756e84` same day) — first real proof
+> this model works mechanically, not just on paper.
+>
+> **Still `git push origin main` never happens** — that was always wrong under
+> either split-model option discussed (this is unchanged, not newly decided).
+> `main` currently contains the full Heartland entity verifier
+> (`entity_procurement.py`) and `scripts/set_mirror_secrets.ps1`; both are
+> deliberately excluded from `public`. See WHAT NOT TO DO.
+>
+> **Historical note, superseded above:** this section previously read "Jay's
+> 09-06 call: don't decide the long-term split model yet, just do not push main
+> to origin until a model is chosen" — that was accurate as of 09-06 but was
+> never updated here after the decision landed on 09-09, leaving this file
+> claiming UNDECIDED for a day after STATE.md already had the resolution.
+> Exactly the "stale roadmap" failure mode this file's own footer warns about —
+> flagged by Jay directly (2026-09-10), fixed here.
 
 ---
 
@@ -184,7 +191,7 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 | 3 | **Public-flip: GO in principle (Jay), but GATED on a clean scrub.** Current-files audit passed, but HISTORY is not clean ([REDACTED] PII). Decision: keep history → **Method A surgical scrub** (filter-repo, redact PII strings + drop 4 internal docs), NOT re-init. | Blocks flip until scrub done + checklist re-run zero-hits |
 | 4 | ~~Legal corpus in the public repo — open / sample / closed?~~ | ✅ **RESOLVED, mislabeled UNDECIDED through v19** — verified live 09-06: public `main` on GitHub ships a 4-clause **sample** corpus (`data/legal_corpus/far_clauses.json`), not the full 104. This was decided and shipped via the `ops` branch (2026-08-05, `0654255` "feat(corpus): add public sample corpus (open-core)") but never written back to this file. Full 104-clause set stays private-layer. |
 | 5 | ~~License — permissive vs noncommercial~~ | ✅ **RESOLVED, mislabeled UNDECIDED through v19** — **PolyForm Shield 1.0** is live in `LICENSE` on the public repo (via `ops` branch, `f3e9c86` "chore: public-release prep — PolyForm license"), never written back to this file. |
-| 7 | **🔴 Public/private split model going forward — UNDECIDED (09-06).** The `ops`→`main` merge on 08-05 established the open-core baseline once, but nothing enforces it on an ongoing basis — see the critical note at the top of this file. Options discussed: (a) revive two branches, `main`=private/full pushed to `jsnnlsn` only + a curated branch pushed to `origin` only, promoted via reviewed cherry-pick/squash; (b) single branch + an explicit never-commit-here path list for private-layer files. Jay's call for now: **decide later, freeze pushes to `origin` in the meantime.** | Blocks any `git push origin` |
+| 7 | ~~Public/private split model going forward~~ | ✅ **RESOLVED 2026-09-09 — Option A.** `main` = full private history, `jsnnlsn` only. Persistent `public` branch = hand-vetted, unaltered commits only, `origin` only. See the critical note at the top of this file for Jay's full reasoning and the 2026-09-10 first-real-push status. | Does not block `git push jsnnlsn` at all; `git push origin main` (the full branch) is still never correct under this model — only `git push origin public` (or PR) is |
 | 6 | **American-models-only** — VERIFY the regulatory basis (is there a *binding* rule, or just EO 14179 pro-dominance + congressional urging on FAR/PRC?). Then swap qwen daily-driver. | Strategically sound for govtech regardless; verify before stating as compliance |
 
 ---
@@ -272,7 +279,7 @@ Scott Nelson engagement permanently closed — building on merit, own timeline.
 - Do not relitigate: aaas_poc.py = publication layer only, 13 vs 22 opportunities = not a bug. (NSF program-officer contact is now stripped from code → gitignored `.env`; do not re-hardcode.)
 - **primordial-galaxy node (09-06):** do not upgrade the kernel or FIPS-related packages without confirming FIPS 140 validation holds first — this is a govtech-compliance box, "newest patch" is not automatically the safe default here.
 - **primordial-galaxy node (09-06):** the uncapped `LOCAL_CPU_THREAD_CAP`/`LOCAL_NUM_GPU` (`None` = no cap) is correct for THIS box's integrated-only graphics, not a general policy change — if local generation ever runs again on the old RX580 box, re-apply an explicit cap via env first.
-- **🔴 (09-06) Do not `git push origin` (or `origin main`) from this repo until the public/private split model (Open Decision #7) is decided.** `main` currently contains private-commercial-layer work (full Heartland `entity_procurement.py`, `set_mirror_secrets.ps1`) that must not reach the public repo. This does not block pushing to `jsnnlsn` on git-sync grounds alone, but confirm the split model first — don't assume `jsnnlsn` should get an identical `main` to whatever eventually ships to `origin`.
+- **Do not `git push origin main` (or the full private history to `origin` in any form) — Open Decision #7 resolved 2026-09-09 to Option A, and this is a permanent rule under that model, not a temporary freeze.** `main` contains private-commercial-layer work (full Heartland `entity_procurement.py`, `set_mirror_secrets.ps1`) that must never reach `origin`. Only the separately curated `public` branch goes to `origin`, via reviewed cherry-pick. `git push jsnnlsn main` is fine and expected — `jsnnlsn` is the private mirror and is meant to carry the full history.
 
 ---
 
