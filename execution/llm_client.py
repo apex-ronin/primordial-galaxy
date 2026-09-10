@@ -69,6 +69,21 @@ LLM_MODE           = os.getenv("LLM_MODE", "auto").lower()
 LOCAL_CPU_THREAD_CAP = int(os.environ["LOCAL_CPU_THREAD_CAP"]) if os.getenv("LOCAL_CPU_THREAD_CAP") else None
 LOCAL_NUM_GPU = int(os.environ["LOCAL_NUM_GPU"]) if os.getenv("LOCAL_NUM_GPU") else None
 
+# 2026-09-10: found live via observatory/procurement_watch.py extraction calls --
+# a prompt complex enough to need real judgment (gemma4 spends tokens on a
+# separate "thinking" field before ever writing the actual answer) returned
+# HTTP 200 with an EMPTY content field, done_reason "length", eval_count stuck
+# at ~925 regardless of num_predict -- a silent-success failure, not an
+# exception a caller would notice without checking the actual text.
+# num_predict was NOT the cause (raising it to 8192 changed nothing, eval_count
+# stayed at 925) -- verified live it's Ollama's default num_ctx (context
+# window), too small to hold the ~3.2K-token prompt plus a real response.
+# Explicit num_ctx=16384 fixed it: done_reason "stop", eval_count 3457, real
+# content. The model's own max is 131K; 16384 is a generous-but-not-max
+# default, override via env for a specific request shape if ever needed.
+LOCAL_NUM_PREDICT = int(os.environ["LOCAL_NUM_PREDICT"]) if os.getenv("LOCAL_NUM_PREDICT") else 8192
+LOCAL_NUM_CTX = int(os.environ["LOCAL_NUM_CTX"]) if os.getenv("LOCAL_NUM_CTX") else 16384
+
 # Last provider that successfully served a completion, e.g. "local (gemma4:12b)".
 # Read via get_last_provider() so callers can report the actual serving tier.
 LAST_PROVIDER = None
@@ -102,7 +117,7 @@ def _try_local(prompt: str, system: str | None, mode: str, json_mode: bool = Fal
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        options = {}
+        options = {"num_predict": LOCAL_NUM_PREDICT, "num_ctx": LOCAL_NUM_CTX}
         if LOCAL_NUM_GPU is not None:
             options["num_gpu"] = LOCAL_NUM_GPU
         if LOCAL_CPU_THREAD_CAP is not None:
@@ -128,7 +143,8 @@ def _try_local(prompt: str, system: str | None, mode: str, json_mode: bool = Fal
         text = resp.json()["message"]["content"].strip()
         global LAST_PROVIDER
         LAST_PROVIDER = f"local ({model})"
-        cap_note = f", num_gpu={LOCAL_NUM_GPU}, num_thread={LOCAL_CPU_THREAD_CAP}" if options else ", uncapped"
+        capped = LOCAL_NUM_GPU is not None or LOCAL_CPU_THREAD_CAP is not None
+        cap_note = f", num_gpu={LOCAL_NUM_GPU}, num_thread={LOCAL_CPU_THREAD_CAP}" if capped else ", uncapped"
         print(f"    [LLM] local ({model}{cap_note})")
         return text
     except Exception as e:
