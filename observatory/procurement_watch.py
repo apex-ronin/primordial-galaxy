@@ -464,11 +464,22 @@ def run_extraction(limit: int = 100, dry_run: bool = False) -> dict:
             tag = "OK" if r["content_hash"] else ("BLOCKED" if r["robots_allowed"] == 0 else "ERROR")
             logger.info("[fetch %d/%d] %-9s %-30s", i, len(targets), tag, name[:30])
 
+    # Look up prior state once, before persisting -- needed both for the bookkeeping
+    # below AND for the new/changed filter that decides what gets extracted.
+    with db.session() as conn:
+        priors = {r["entity_id"]: db.get_procurement_watch(conn, r["entity_id"]) for r in fetch_results}
+
+    def _is_new_or_changed(r) -> bool:
+        prior = priors.get(r["entity_id"])
+        if not prior or not prior.get("content_hash"):
+            return True  # no baseline yet -- first time seeing this page, needs a baseline extraction
+        return prior["content_hash"] != r["content_hash"]
+
     # Persist the same Phase A hash bookkeeping (baseline for future change-detection).
     if not dry_run:
         with db.session() as conn:
             for r in fetch_results:
-                prior = db.get_procurement_watch(conn, r["entity_id"])
+                prior = priors.get(r["entity_id"])
                 consecutive_errors = 0 if r["content_hash"] else (prior.get("consecutive_errors", 0) if prior else 0) + 1
                 is_change = bool(r["content_hash"] and prior and prior.get("content_hash") and prior["content_hash"] != r["content_hash"])
                 db.upsert_procurement_watch(conn, {
@@ -480,9 +491,13 @@ def run_extraction(limit: int = 100, dry_run: bool = False) -> dict:
                     "first_checked": prior.get("first_checked") if prior else r["last_checked"],
                 })
 
-    # Phase B: extract on every successfully-fetched page.
-    fetched = [r for r in fetch_results if r["content_hash"] and r["visible_text"]]
-    logger.info("Phase B: extracting on %d successfully-fetched pages...", len(fetched))
+    # Phase B: extract only on pages that are new or changed since the last check --
+    # Jay's directive 2026-09-13: an unchanged page has nothing new to find, so skip
+    # the expensive LLM call entirely rather than re-extracting the whole sample every run.
+    all_fetched = [r for r in fetch_results if r["content_hash"] and r["visible_text"]]
+    fetched = [r for r in all_fetched if _is_new_or_changed(r)]
+    logger.info("Phase B: extracting on %d new/changed pages (%d unchanged, skipped)...",
+                len(fetched), len(all_fetched) - len(fetched))
 
     raw_opportunities = []
     flagged_pages = []
@@ -531,8 +546,8 @@ def run_extraction(limit: int = 100, dry_run: bool = False) -> dict:
 
     if dry_run:
         return {
-            "candidates": len(rows), "fetched": len(fetched),
-            "raw_extracted": len(raw_opportunities), "dry_run": True,
+            "candidates": len(rows), "fetched_total": len(all_fetched),
+            "extracted_on": len(fetched), "raw_extracted": len(raw_opportunities), "dry_run": True,
         }
 
     # Delta-check + score + ingest, exactly like main.py's Phase 2.
@@ -565,7 +580,8 @@ def run_extraction(limit: int = 100, dry_run: bool = False) -> dict:
     high = [o for o in scored_opportunities if o.get("fit_label") == "High"]
     summary = {
         "candidates": len(rows),
-        "fetched": len(fetched),
+        "fetched_total": len(all_fetched),
+        "extracted_on": len(fetched),
         "raw_extracted": len(raw_opportunities),
         "new_scored": new_count,
         "reused": reused_count,
