@@ -73,6 +73,37 @@ FLAG_EXTRACTION_COUNT_THRESHOLD = 10  # more than this from one page is treated 
                                        # over-extraction (see libertycountyfl.org, 2026-09-10)
                                        # -- held for review instead of auto-ingested
 
+# Regional split for cron scheduling (Jay's directive, 2026-09-13): run each US
+# timezone's entities during ITS OWN 1-4am local window, not one global time that's
+# off-peak for some states and mid-morning for others. This box's cron daemon runs
+# a single system timezone (UTC) with no per-job TZ support (confirmed via
+# `man 5 crontab` -- TZ set in a crontab only affects the command's environment,
+# not when it fires), so each region gets its own cron entry at a manually
+# UTC-converted time. That conversion drifts by 1hr at each DST transition --
+# see run_procurement_watch.sh's header for the current offsets in use.
+#
+# APPROXIMATE by design, not survey-grade: bucketed by each state's MAJORITY zone,
+# folded down to Jay's requested 3 buckets (Mountain states folded into "central",
+# AK/HI folded into "pacific" as the nearest available bucket). States that
+# genuinely split zones (TX, TN, FL panhandle, IN, KY, ND/SD/NE/KS western edges,
+# ID, plus AZ not observing DST at all) are bucketed by population-weighted
+# majority, not perfectly per-entity. Good enough for scheduling; if this list
+# needs to become per-entity-precise later, that's a real (bigger) project, not
+# a quick edit here.
+REGION_STATES = {
+    "eastern": {
+        "CT", "DE", "DC", "FL", "GA", "IN", "KY", "ME", "MD", "MA", "MI", "NH",
+        "NJ", "NY", "NC", "OH", "PA", "RI", "SC", "VT", "VA", "WV",
+    },
+    "central": {
+        "AL", "AR", "IA", "IL", "KS", "LA", "MN", "MS", "MO", "NE", "ND", "OK",
+        "SD", "TN", "TX", "WI", "CO", "MT", "NM", "UT", "WY", "AZ", "ID",
+    },
+    "pacific": {
+        "CA", "NV", "OR", "WA", "AK", "HI",
+    },
+}
+
 
 class ExtractionError(Exception):
     """Local extraction failed after retries. Deliberately NOT caught inside
@@ -412,16 +443,22 @@ def _synthetic_link(page_url: str, title: str, detail_url: str | None) -> str:
     return f"{page_url}#{title_hash}"
 
 
-def run_extraction(limit: int = 100, dry_run: bool = False) -> dict:
+def run_extraction(limit: int = 100, dry_run: bool = False, region: str | None = None) -> dict:
     """Phase B: fetch + hash + extract + ingest, for every site in the sample.
 
-    Runs extraction on every page checked (not just ones flagged as changed) --
-    there's no prior baseline to compare against yet for a first pass, so this
-    pass itself IS the baseline going forward. Whatever's found is scored and
-    saved through the exact same path a SAM.gov/grants.gov/CSDA result takes
+    Extraction only runs on pages that are new or changed since the last check
+    (see the new/changed filter below) -- unchanged pages already have their
+    opportunities recorded, so re-extracting them would just cost an LLM call
+    for no new information. Whatever's found is scored and saved through the
+    exact same path a SAM.gov/grants.gov/CSDA result takes
     (hunter_brain.analyze_opportunity -> observatory.recorder.record_run), so
     it shows up in opportunities/the dashboard/Phase 3.5 antibody eligibility
     like any other source -- not a separate parallel system.
+
+    region: one of REGION_STATES's keys ("eastern"/"central"/"pacific"), or None
+    for no filtering (all verified entities regardless of state). Used to split
+    this into 3 separate cron jobs, each running during ITS OWN 1-4am local
+    window -- see REGION_STATES's comment for why and its bucketing caveats.
     """
     import os
     import sys
@@ -430,14 +467,28 @@ def run_extraction(limit: int = 100, dry_run: bool = False) -> dict:
     from hunter_brain import analyze_opportunity  # noqa: E402
     from . import recorder
 
+    if region is not None and region not in REGION_STATES:
+        raise ValueError(f"Unknown region {region!r} -- expected one of {sorted(REGION_STATES)} or None")
+
     db.init_db()
     with db.session() as conn:
-        rows = conn.execute(
-            "SELECT entity_id, name, procurement_url FROM entity_procurement "
-            "WHERE verify_status = 'verified' AND procurement_url IS NOT NULL "
-            "ORDER BY entity_id LIMIT ?",
-            (limit,),
-        ).fetchall()
+        if region:
+            states = sorted(REGION_STATES[region])
+            placeholders = ",".join("?" * len(states))
+            rows = conn.execute(
+                f"SELECT entity_id, name, procurement_url FROM entity_procurement "
+                f"WHERE verify_status = 'verified' AND procurement_url IS NOT NULL "
+                f"AND state_code IN ({placeholders}) "
+                f"ORDER BY entity_id LIMIT ?",
+                (*states, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT entity_id, name, procurement_url FROM entity_procurement "
+                "WHERE verify_status = 'verified' AND procurement_url IS NOT NULL "
+                "ORDER BY entity_id LIMIT ?",
+                (limit,),
+            ).fetchall()
         breakered = {
             r["entity_id"]
             for r in conn.execute(
@@ -447,8 +498,8 @@ def run_extraction(limit: int = 100, dry_run: bool = False) -> dict:
         }
 
     targets = [(r["entity_id"], r["name"], r["procurement_url"]) for r in rows if r["entity_id"] not in breakered]
-    logger.info("Phase B: %d candidates, %d skipped (circuit breaker), %d to fetch",
-                len(rows), len(rows) - len(targets), len(targets))
+    logger.info("Phase B%s: %d candidates, %d skipped (circuit breaker), %d to fetch",
+                f" [{region}]" if region else "", len(rows), len(rows) - len(targets), len(targets))
 
     started_at = datetime.now(timezone.utc).isoformat()
     fetch_results = []
@@ -604,12 +655,15 @@ def main() -> None:
     p_extract = sub.add_parser("extract", help="Phase B: fetch + hash + LLM-extract + score + ingest.")
     p_extract.add_argument("--limit", type=int, default=100)
     p_extract.add_argument("--dry-run", action="store_true", help="Fetch + extract but don't score/ingest/write.")
+    p_extract.add_argument("--region", choices=sorted(REGION_STATES), default=None,
+                            help="Only run entities whose state falls in this US timezone bucket "
+                                 "(see REGION_STATES) -- used to split cron runs by timezone.")
 
     args = parser.parse_args()
     if args.command == "pilot":
         pilot(limit=args.limit, dry_run=args.dry_run)
     elif args.command == "extract":
-        run_extraction(limit=args.limit, dry_run=args.dry_run)
+        run_extraction(limit=args.limit, dry_run=args.dry_run, region=args.region)
 
 
 if __name__ == "__main__":
