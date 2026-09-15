@@ -86,22 +86,53 @@ def main():
         print("\n[!] No opportunities found from any source (all failed or returned 0).")
         return
 
-    # 2. Analysis Phase
+    # 2. Analysis Phase — delta-aware (Jay's directive, 2026-09-07): the
+    # `opportunities` table already accumulates one row per link across every
+    # run (first_seen preserved), so a link seen in any prior run gets its
+    # stored score reused instead of paying for a fresh fetch + LLM call.
+    # Every genuinely new link still gets fully analyzed AND has its raw
+    # document text permanently archived (see hunter_brain.analyze_opportunity
+    # -> observatory/archive.py), regardless of the score it lands on.
     print(f"\n--- PHASE 2: ANALYSIS ({len(all_opportunities)} items) ---")
-    
+
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from observatory import db as obs_db
+    obs_db.init_db()
+
     scored_opportunities = []
+    new_count = reused_count = 0
     for opp in all_opportunities:
-        # We could also wrap analyze_opportunity in orchestrator if we wanted resilience per-item
-        # But for now, let's keep it simple.
+        link = opp.get('link')
         try:
-            scored_opp = analyze_opportunity(opp)
+            existing = None
+            if link:
+                with obs_db.session() as conn:
+                    existing = obs_db.get_opportunity_by_link(conn, link)
+
+            if existing and existing.get('raw_json'):
+                # Note: analysis_method is left exactly as originally recorded
+                # (reflects how it was actually scored) -- delta_status/first_seen
+                # are separate fields instead of appending a tag onto
+                # analysis_method, so re-reusing the same opportunity across many
+                # future runs can't stack up repeated "[reused...]" text.
+                scored_opp = json.loads(existing['raw_json'])
+                scored_opp['delta_status'] = "reused"
+                scored_opp['first_seen'] = existing.get('first_seen')
+                reused_count += 1
+                source_tag = f"[{opp.get('source', 'Unknown')}]"
+                print(f"    > {source_tag} {scored_opp['title'][:40]}... | Score: {scored_opp['win_probability']} ({scored_opp['fit_label']}) [reused]")
+            else:
+                scored_opp = analyze_opportunity(opp)
+                scored_opp['delta_status'] = "new"
+                new_count += 1
+                source_tag = f"[{opp.get('source', 'Unknown')}]"
+                print(f"    > {source_tag} {scored_opp['title'][:40]}... | Score: {scored_opp['win_probability']} ({scored_opp['fit_label']})")
+
             scored_opportunities.append(scored_opp)
-            
-            # Live feedback
-            source_tag = f"[{opp.get('source', 'Unknown')}]"
-            print(f"    > {source_tag} {scored_opp['title'][:40]}... | Score: {scored_opp['win_probability']} ({scored_opp['fit_label']})")
         except Exception as e:
             print(f"    [!] Analysis failed for item: {str(e)}")
+
+    print(f"\n[*] Phase 2 delta summary: {new_count} new (scored), {reused_count} reused (already archived)")
 
     # 3. Save & Report
     print(f"\n--- PHASE 3: REPORTING ---")
@@ -139,6 +170,39 @@ def main():
         contact = h.get('contact')
         if contact:
             print(f"    [+] POINT OF CONTACT: {contact}")
+
+    # 3.5 Grounded Antibody Pipeline (Item 24) — HIGH-fit opportunities only.
+    # Scoped to high_value, not the full actionable set: red_team_analysis() +
+    # antibody_agent.generate() are each a "precise"-mode LLM call, and this
+    # pipeline was previously orphaned from main.py entirely (never wired in,
+    # procurement_shield.json untouched since 2026-06-11) partly because its
+    # old CLI path blocked on input() -- incompatible with an unattended run.
+    # See red_team_simulation.run_batch()/save_threats() for the pending-review
+    # replacement for that gate.
+    #
+    # 2026-09-07 fix: further scoped to delta_status == "new" -- live-caught via
+    # a real run: a HIGH-fit opportunity that's still live (and correctly
+    # reused, no re-fetch/re-score) was still getting a full fresh red-team +
+    # antibody draft every single run, because this step never checked
+    # delta_status at all. That's the most expensive part of the pipeline (2
+    # precise-mode LLM calls) re-running on unchanged input, and it was
+    # quietly appending a near-duplicate clause for the same opportunity into
+    # procurement_shield_pending.json on every run it stayed live -- exactly
+    # the "accumulates forever, nothing tells good from bad/redundant apart"
+    # problem Jay flagged 09-07. A reused opportunity keeps its
+    # already-recorded red_team/immune_system fields (from when it was new);
+    # nothing here re-derives or drops them.
+    new_high_value = [h for h in high_value if h.get('delta_status') == 'new']
+    if new_high_value:
+        print(f"\n--- PHASE 3.5: ANTIBODY (grounded clause drafting, {len(new_high_value)} new HIGH-fit"
+              f" of {len(high_value)} total) ---")
+        try:
+            import red_team_simulation
+            red_team_simulation.init_simulation()
+            threats = red_team_simulation.run_batch(new_high_value)
+            red_team_simulation.save_threats(threats)
+        except Exception as e:
+            print(f"[!] Antibody pipeline failed (non-fatal): {e}")
 
     # 4. Observability — record this run into the SQLite spine for the dashboard.
     # Non-fatal by design: any failure here is logged and swallowed so the

@@ -14,8 +14,10 @@ trip a rate limit:
 Source routing (per docs/GOVINFO_RESEARCH_2026-06-14.md):
   far / dfars -> govinfo granule htm:  /packages/{pkg}/granules/{granuleId}/htm
   gao         -> govinfo package htm:  /packages/{packageId}/htm
-  eo          -> already carries the Federal Register abstract from ingest;
-                 full-text upgrade is a later refinement (skipped here).
+  eo          -> Federal Register raw_text_url (captured into meta_json by
+                 ingest.py's fetch_executive_orders as of 2026-09-06 -- the
+                 `abstract` field this source used to rely on is empty for most
+                 EOs, which is why it sat at 0% filled since ingest began).
 
 Usage (repo root, venv python):
     python -m observatory.fulltext --source far --limit 3      # test batch
@@ -73,6 +75,12 @@ def _strip_html(html: str) -> str:
         # crude fallback: drop tags
         import re
         text = re.sub(r"<[^>]+>", " ", html)
+    # 2026-09-06 fix: Federal Register's raw .txt EOs embed literal NUL bytes as
+    # page-break artifacts (verified live -- EO 14411 has 9 of them). Python's
+    # sqlite3 driver silently truncates a stored string at the first NUL, so an
+    # unstripped NUL here doesn't error, it just quietly saves ~2% of the real
+    # document (288 of 17,545 chars, in that case) with no exception anywhere.
+    text = text.replace("\x00", " ")
     return " ".join(text.split())
 
 
@@ -91,7 +99,17 @@ def _url_for(row) -> str | None:
         # the bare /txt path 400s for older GAOREPORTS. _strip_html cleans the htm.
         # (Verified live 2026-06-27; matches this module's docstring routing.)
         return f"{GOVINFO_BASE}/packages/{row['citation']}/htm?api_key={GOVINFO_KEY}"
-    return None  # eo handled via its ingest abstract
+    if source == "eo":
+        # 2026-09-06 fix: Federal Register's `abstract` field is empty for most EOs
+        # (confirmed live -- EOs don't carry a summary, the text IS the document),
+        # which is why this source sat at 0% filled since ingest began. `raw_text_url`
+        # (captured into meta_json by ingest.py's fetch_executive_orders as of this
+        # fix) points at a plain .txt endpoint wrapped in a minimal HTML shell --
+        # _strip_html handles that fine, same as the htm sources above. Federal
+        # Register is a different host than govinfo (no api_key needed here).
+        meta = json.loads(row["meta_json"] or "{}")
+        return meta.get("raw_text_url")
+    return None
 
 
 def fill(source: str | None = None, limit: int | None = None,

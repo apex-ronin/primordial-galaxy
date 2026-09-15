@@ -88,6 +88,7 @@ RFP Text:
             prompt,
             system="You are a JSON-only API. Output strictly valid JSON. No markdown, no code blocks, no backticks.",
             mode="fast",
+            json_mode=True,
         )
         if not raw:
             print("    [!] All LLM providers failed — falling back to keyword scoring")

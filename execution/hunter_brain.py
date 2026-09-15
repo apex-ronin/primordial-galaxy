@@ -1,14 +1,21 @@
 import json
+import os
+import sys
 from doc_fetcher import get_document_text
 from gemini_analyst import analyze_rfp
 
 def analyze_opportunity(opportunity):
     """
     Analyzes an opportunity using AI when possible, falls back to keywords.
+
+    Only called by main.py for links not already in the `opportunities` table
+    (see execution/main.py's Phase 2 delta check, Jay's directive 2026-09-07) --
+    so every call here is, by construction, a genuinely new opportunity, and
+    this is the one place its raw document text gets permanently archived.
     """
     title = opportunity['title'].lower()
     link = opportunity['link']
-    
+
     # 1. Get Content — title + snippet seed, upgraded with full document text.
     # Item 3.4 (2026-06-09): non-PDF links (CSDA posting pages) now get the page
     # text + linked RFP documents pulled, so red-team/antibody work from full
@@ -22,6 +29,16 @@ def analyze_opportunity(opportunity):
     pdf_status = status
     if text:
         full_text = f"{title}\n{snippet}\n\n{text}"
+
+    # Archive the raw fetch — regardless of score, per Jay's directive: house a
+    # physical copy of every RFP/grant encountered. Non-fatal by design (a
+    # permanent-archive write failure shouldn't block the actual analysis).
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from observatory import archive as opp_archive
+        opp_archive.archive_document(link, full_text)
+    except Exception as e:
+        print(f"    [!] Archive write failed (non-fatal): {e}")
 
     # 2. Try AI Analysis (if we have content)
     # 2026-06-09 fix: the old >100-char gate silently dropped short-title records

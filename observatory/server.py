@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import json
 from html import escape
+from urllib.parse import quote
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Form
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from . import db
 
@@ -65,6 +66,100 @@ def api_opps(limit: int = 50, run_id: int | None = None) -> JSONResponse:
 def api_corpus() -> JSONResponse:
     with db.session() as conn:
         return JSONResponse(db.corpus_stats(conn))
+
+
+@app.get("/api/entity-procurement")
+def api_entity_procurement() -> JSONResponse:
+    with db.session() as conn:
+        return JSONResponse(db.entity_procurement_stats(conn))
+
+
+# ---------------------------------------------------------------------------
+# Heartland review queue (Arc #6, 2026-08-11) -- Jay's eyes on everything
+# before it sends. "Approve" here means "I've seen it, draft is ready" -- it
+# never triggers a send. Nothing in this app sends anything, ever.
+# ---------------------------------------------------------------------------
+
+@app.post("/heartland/decide/{review_id}")
+def heartland_decide(review_id: int, action: str = Form(...)) -> RedirectResponse:
+    status = "approved" if action == "approve" else "dismissed"
+    with db.session() as conn:
+        db.decide_review(conn, review_id, status, _now())
+    return RedirectResponse(url="/heartland", status_code=303)
+
+
+@app.get("/heartland", response_class=HTMLResponse)
+def heartland() -> HTMLResponse:
+    with db.session() as conn:
+        pending = db.review_queue(conn, "pending_review", limit=100)
+        approved = db.review_queue(conn, "approved", limit=50)
+        stats = db.entity_procurement_stats(conn)
+    return HTMLResponse(_render_heartland(pending, approved, stats))
+
+
+def _mailto(row) -> str:
+    to = row["contact_email"] or ""
+    subject = quote(row["draft_subject"] or "")
+    body = quote(row["draft_body"] or "")
+    return f"mailto:{escape(to)}?subject={subject}&body={body}"
+
+
+def _render_heartland_row(row, decidable: bool) -> str:
+    email_note = (escape(row["contact_email"]) if row["contact_email"]
+                  else '<span style="color:#e67e22">no email on file -- find a contact via the site below</span>')
+    site = escape(row["procurement_url"] or row["website"] or "")
+    actions = ""
+    if decidable:
+        actions = f"""
+          <form method="post" action="/heartland/decide/{row['id']}" style="display:inline">
+            <input type="hidden" name="action" value="approve">
+            <button class="btn approve" type="submit">Approve draft</button>
+          </form>
+          <form method="post" action="/heartland/decide/{row['id']}" style="display:inline">
+            <input type="hidden" name="action" value="dismiss">
+            <button class="btn dismiss" type="submit">Dismiss</button>
+          </form>"""
+    else:
+        actions = f'<a class="btn" href="{_mailto(row)}">Open in email client</a>'
+    return f"""
+    <div class="card review">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <h3 style="margin-bottom:2px">{escape(row['entity_name'] or '')}</h3>
+          <div class="muted">{escape(row['state_code'] or '')} &nbsp;·&nbsp; {escape(row['government_type'] or '')}
+            &nbsp;·&nbsp; pop {row['population'] if row['population'] is not None else '—'}
+            &nbsp;·&nbsp; platform: {escape(row['portal_platform'] or '—')}</div>
+        </div>
+        <div>{_badge(f"priority {row['priority_score']}", "#e67e22")}</div>
+      </div>
+      <div style="margin:10px 0"><b>Why flagged:</b> {escape(row['reason'] or '')}</div>
+      <div class="muted" style="margin-bottom:8px">Source page: <a href="{site}" target="_blank" rel="noopener">{site}</a></div>
+      <details>
+        <summary>Draft ({escape(row['draft_subject'] or '')})</summary>
+        <div class="draft">To: {email_note}<br>Subject: {escape(row['draft_subject'] or '')}<br><br>{escape(row['draft_body'] or '').replace(chr(10), '<br>')}</div>
+      </details>
+      <div style="margin-top:10px">{actions}</div>
+    </div>
+    """
+
+
+def _render_heartland(pending, approved, stats) -> str:
+    cov = stats["by_status"]
+    cov_line = " · ".join(f"{escape(k)}: {v}" for k, v in cov.items())
+    header = f"""
+    <div class="card">
+      <h3>Entity coverage</h3>
+      <div class="muted">{stats['total']} entities tracked &nbsp;|&nbsp; {cov_line}</div>
+    </div>
+    """
+    pending_html = "".join(_render_heartland_row(r, decidable=True) for r in pending) \
+        or '<div class="card muted">Nothing pending review. Run scan-compliance + build-queue to refresh.</div>'
+    approved_html = "".join(_render_heartland_row(r, decidable=False) for r in approved) \
+        or '<div class="card muted">Nothing approved yet.</div>'
+    body = (header
+            + f'<h2 style="margin-top:24px">Pending your review ({len(pending)})</h2>' + pending_html
+            + f'<h2 style="margin-top:24px">Approved -- ready to send yourself ({len(approved)})</h2>' + approved_html)
+    return _PAGE.format(body=body, generated=_fmt_dt(_now()))
 
 
 # ---------------------------------------------------------------------------
@@ -302,12 +397,23 @@ _PAGE = """<!doctype html>
   ul {{ margin:0; padding-left:18px; }}
   ul.vuln {{ list-style:none; padding:0; }}
   ul.vuln li {{ padding:6px 0; border-bottom:1px solid #222a3a; }}
+  .row {{ display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; }}
+  .card.review {{ border-color:#2a3550; }}
+  .btn {{ display:inline-block; background:#1c2333; border:1px solid #2a3550; color:#e6e6e6;
+          padding:7px 14px; border-radius:8px; font-size:13px; cursor:pointer; margin-right:8px; }}
+  .btn:hover {{ background:#232b40; text-decoration:none; }}
+  .btn.approve {{ border-color:#2ecc71; color:#2ecc71; }}
+  .btn.dismiss {{ border-color:#e74c3c; color:#e74c3c; }}
+  details {{ margin-top:8px; }}
+  summary {{ cursor:pointer; color:#5da9ff; font-size:13px; }}
+  .draft {{ background:#0b0e14; border:1px solid #222a3a; border-radius:8px; padding:12px;
+            margin-top:8px; font-size:13px; white-space:normal; }}
 </style>
 </head><body>
   <div class="wrap">
     <div class="top">
       <h2>🛰  PRIMORDIAL OBSERVATORY</h2>
-      <div class="muted">GovTech Hunter · generated {generated}</div>
+      <div class="muted">GovTech Hunter · <a href="/">dashboard</a> · <a href="/heartland">Heartland review</a> · generated {generated}</div>
     </div>
     {body}
   </div>

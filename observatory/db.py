@@ -3,13 +3,34 @@
 One file, no server, no cloud. Lives at <repo>/data/primordial.db (gitignored as
 runtime data — it is fully regenerable from opportunities.json + scan logs).
 
-Three tables:
-  runs          — one row per scanner run: when, how long, status, per-source
-                  counts, which LLM tier actually served, errors, log path.
-  opportunities — deduped by link; carries the full scored record plus
-                  first_seen / last_seen so the dashboard can show history/trend.
-  corpus_docs   — the knowledge store the ORACLE agents draw on (govinfo, FAR,
-                  DFARS, EOs, GAO/IG fraud cases). Deduped by (source, citation).
+Four tables:
+  runs               — one row per scanner run: when, how long, status,
+                       per-source counts, which LLM tier actually served,
+                       errors, log path.
+  opportunities      — deduped by link; carries the full scored record plus
+                       first_seen / last_seen so the dashboard can show
+                       history/trend.
+  corpus_docs        — the knowledge store the ORACLE agents draw on (govinfo,
+                       FAR, DFARS, EOs, GAO/IG fraud cases). Deduped by
+                       (source, citation).
+  entity_procurement — Arc #6 Heartland Phase 1: one row per Census-of-
+                       Governments entity (principalities-index, 78,291
+                       units). Tracks whether its website is live, whether a
+                       procurement/bids page was located, and which shared
+                       portal platform (if any) it runs on. Deduped by
+                       entity_id (the Census GIDID).
+  outreach_review    — Arc #6 Heartland review queue (2026-08-11, Jay's
+                       directive: his eyes on everything before it sends).
+                       One row per entity flagged worth his attention, with a
+                       generated draft. Nothing here ever sends itself --
+                       "approved" just means Jay has seen it and the draft is
+                       ready for HIM to send from his own email client.
+  procurement_watch  — Direct-source daily crawl pilot (2026-09-10, Jay's
+                       directive): one row per entity_procurement URL,
+                       tracking a content hash so a daily fetch can detect
+                       "this agency's procurement page changed" without
+                       re-parsing every page every day. See
+                       observatory/procurement_watch.py.
 """
 
 from __future__ import annotations
@@ -85,10 +106,91 @@ CREATE TABLE IF NOT EXISTS corpus_docs (
     UNIQUE(source, citation)
 );
 
+CREATE TABLE IF NOT EXISTS entity_procurement (
+    entity_id               TEXT PRIMARY KEY,  -- Census GIDID, e.g. "1100100100000"
+    name                    TEXT,
+    state_code              TEXT,
+    government_type         TEXT,   -- Census type code + label, e.g. "1 - COUNTY"
+    county                  TEXT,
+    population              INTEGER,
+    website                 TEXT,   -- input: contact_skeleton.web_address from principalities-index
+    contact_email           TEXT,   -- input: contact_skeleton.caio_email from principalities-index -- usually NULL
+    website_live            INTEGER,-- 0 | 1 | NULL(not yet checked)
+    website_status_code     INTEGER,
+    procurement_url         TEXT,   -- discovered bids/RFP/procurement page, if any
+    procurement_confidence  TEXT,   -- domain_signature | keyword_match | NULL
+    portal_platform         TEXT,   -- bidnet_direct | bonfire | opengov_procurenow | demandstar |
+                                    -- publicpurchase | questcdn | ionwave | periscope_bidsync |
+                                    -- cit_e | custom_html | none | unknown
+    verify_status           TEXT,   -- pending | verified | no_website | site_down | no_procurement_found | error
+    verify_attempts         INTEGER DEFAULT 0,
+    error_detail            TEXT,
+    first_seen              TEXT,
+    last_seen               TEXT,
+    last_verified_at        TEXT,
+    far_citations_json      TEXT,   -- JSON list of FAR/DFARS clause numbers found on procurement_url's
+                                    -- page text, e.g. ["52.204-21"] -- a marker the solicitation carries
+                                    -- federal grant flow-down clauses, worth a human compliance look.
+                                    -- NULL = not scanned yet; "[]" = scanned, none found.
+    meta_json               TEXT
+);
+
+CREATE TABLE IF NOT EXISTS outreach_review (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_id      TEXT,   -- FK to entity_procurement.entity_id
+    reason         TEXT,   -- human-readable why this was flagged
+    priority_score INTEGER,
+    contact_email  TEXT,   -- from principalities-index contact_skeleton.caio_email -- usually NULL;
+                           -- when NULL the dashboard must say so plainly, never imply a verified recipient
+    draft_subject  TEXT,
+    draft_body     TEXT,
+    status         TEXT DEFAULT 'pending_review',  -- pending_review | approved | dismissed
+    created_at     TEXT,
+    decided_at     TEXT,
+    UNIQUE(entity_id)
+);
+
+CREATE TABLE IF NOT EXISTS opportunity_documents (
+    link            TEXT PRIMARY KEY,  -- same key as opportunities.link
+    content_hash    TEXT,              -- sha256 of raw_text, detects a re-posted/amended link
+    raw_text_path   TEXT,              -- path under data/opportunity_archive/, full fetched text
+    char_count      INTEGER,
+    first_seen      TEXT,
+    last_seen       TEXT,
+    retention_until TEXT               -- Jay's directive (2026-09-07): keep every RFP/grant
+                                        -- regardless of score, for a retention window (default
+                                        -- ~2 years, ARCHIVE_RETENTION_DAYS env-overridable) --
+                                        -- metadata only for now, no auto-delete job yet.
+);
+
+CREATE TABLE IF NOT EXISTS procurement_watch (
+    entity_id           TEXT PRIMARY KEY,  -- FK to entity_procurement.entity_id
+    url                 TEXT,
+    domain              TEXT,
+    content_hash        TEXT,              -- sha256 of fetched body, detects a change since last check
+    robots_allowed      INTEGER,           -- 1 | 0 | NULL(robots.txt fetch itself failed -- treated as skip, not allow)
+    last_status_code    INTEGER,
+    consecutive_errors  INTEGER DEFAULT 0, -- circuit breaker: back off a domain after repeated failures
+    check_count         INTEGER DEFAULT 0,
+    change_count        INTEGER DEFAULT 0,
+    first_checked       TEXT,
+    last_checked        TEXT,
+    last_changed        TEXT,
+    last_error          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_procwatch_domain ON procurement_watch(domain);
+CREATE INDEX IF NOT EXISTS idx_procwatch_changed ON procurement_watch(last_changed DESC);
+
 CREATE INDEX IF NOT EXISTS idx_opp_win   ON opportunities(win_probability DESC);
 CREATE INDEX IF NOT EXISTS idx_opp_run   ON opportunities(last_run_id);
 CREATE INDEX IF NOT EXISTS idx_runs_time ON runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_corpus_src ON corpus_docs(source);
+CREATE INDEX IF NOT EXISTS idx_entproc_state  ON entity_procurement(state_code);
+CREATE INDEX IF NOT EXISTS idx_entproc_status ON entity_procurement(verify_status);
+CREATE INDEX IF NOT EXISTS idx_entproc_portal ON entity_procurement(portal_platform);
+CREATE INDEX IF NOT EXISTS idx_outreach_status   ON outreach_review(status);
+CREATE INDEX IF NOT EXISTS idx_outreach_priority ON outreach_review(priority_score DESC);
 """
 
 
@@ -106,10 +208,28 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
     return conn
 
 
+# Columns added to entity_procurement after its first release. CREATE TABLE IF
+# NOT EXISTS is a no-op on an already-existing table, so new columns need an
+# explicit ALTER TABLE -- this keeps the live DB (with real, slow-to-redo
+# verification results) intact instead of requiring a drop/recreate.
+_ENTITY_PROCUREMENT_MIGRATIONS = [
+    ("contact_email", "TEXT"),
+    ("far_citations_json", "TEXT"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(entity_procurement)")}
+    for col, coltype in _ENTITY_PROCUREMENT_MIGRATIONS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE entity_procurement ADD COLUMN {col} {coltype}")
+
+
 def init_db(db_path: str | None = None) -> None:
-    """Create tables/indexes if absent. Idempotent."""
+    """Create tables/indexes if absent, then apply any pending column migrations. Idempotent."""
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
 
 
@@ -145,6 +265,54 @@ def insert_run(conn: sqlite3.Connection, run: dict) -> int:
         [run.get(c) for c in cols],
     )
     return cur.lastrowid
+
+
+def get_opportunity_by_link(conn: sqlite3.Connection, link: str) -> dict | None:
+    """Look up a previously-scored opportunity by link, or None if never seen.
+
+    Basis for the delta pipeline (Jay's directive, 2026-09-07): main.py checks
+    this before paying for a document fetch + LLM score. `opportunities` already
+    accumulates one row per link across every run (see upsert_opportunity),
+    first_seen preserved -- no new table needed just to know "have we seen this."
+    """
+    row = conn.execute("SELECT * FROM opportunities WHERE link = ?", (link,)).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_opportunity_document(conn: sqlite3.Connection, doc: dict) -> None:
+    """Insert or refresh a raw-text archive row, keyed on link. See observatory/archive.py."""
+    cols = ["link", "content_hash", "raw_text_path", "char_count",
+            "first_seen", "last_seen", "retention_until"]
+    update_cols = [c for c in cols if c not in ("link", "first_seen")]
+    set_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+    placeholders = ", ".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO opportunity_documents ({', '.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(link) DO UPDATE SET {set_clause}",
+        [doc.get(c) for c in cols],
+    )
+
+
+def upsert_procurement_watch(conn: sqlite3.Connection, row: dict) -> None:
+    """Insert or refresh a procurement_watch row, keyed on entity_id. See observatory/procurement_watch.py."""
+    cols = ["entity_id", "url", "domain", "content_hash", "robots_allowed",
+            "last_status_code", "consecutive_errors", "check_count", "change_count",
+            "first_checked", "last_checked", "last_changed", "last_error"]
+    update_cols = [c for c in cols if c not in ("entity_id", "first_checked")]
+    set_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+    placeholders = ", ".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO procurement_watch ({', '.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(entity_id) DO UPDATE SET {set_clause}",
+        [row.get(c) for c in cols],
+    )
+
+
+def get_procurement_watch(conn: sqlite3.Connection, entity_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM procurement_watch WHERE entity_id = ?", (entity_id,)
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def upsert_opportunity(conn: sqlite3.Connection, opp: dict, run_id: int, seen_at: str) -> None:
@@ -195,16 +363,189 @@ def upsert_corpus_doc(conn: sqlite3.Connection, doc: dict) -> None:
 
     Used by the govinfo / FAR / DFARS / EO ingest (arc #3) and read by the
     ORACLE agents (arc #4).
+
+    2026-09-06 fix: ingest.py's fetch_* functions write cheap metadata rows with
+    text="" (or, for EOs, Federal Register's often-empty `abstract`) -- the real
+    body is filled later, lazily, by fulltext.py's separate rate-limited pass.
+    Before this fix, text=excluded.text unconditionally overwrote on conflict,
+    so once scheduling re-runs ingest on a cron, any text fulltext.fill() had
+    already backfilled would get silently wiped back to empty on the next sweep
+    (embedded flag too, along with it -- see below). Never let a re-ingest
+    replace non-empty text with empty; a later fulltext.fill() pass can still
+    overwrite text going the other way (empty -> real body).
+
+    2026-09-07 fix: the embedded guard above was too blunt -- "once embedded=1,
+    stay 1 forever" also blocked a legitimate re-embed when text genuinely
+    *changes* to different non-empty content (e.g. observatory.ingest.
+    fetch_ecfr_title48 refreshing a FAR/DFARS row that was previously ingested
+    text-empty from the annual-CFR path, or a future amendment). Corrected:
+    embedded resets to 0 whenever incoming text is non-empty AND differs from
+    what's already stored -- so a real content change is picked up by the next
+    embed_corpus.py run, while an empty/unchanged incoming text still can't
+    clobber a good embedded=1 row.
     """
     cols = ["source", "collection", "citation", "title", "url",
             "published", "fetched_at", "text", "embedded", "meta_json"]
     update_cols = [c for c in cols if c not in ("source", "citation")]
-    set_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+    set_clause_parts = []
+    for c in update_cols:
+        if c == "text":
+            set_clause_parts.append(
+                "text = CASE WHEN excluded.text = '' OR excluded.text IS NULL "
+                "THEN corpus_docs.text ELSE excluded.text END"
+            )
+        elif c == "embedded":
+            set_clause_parts.append(
+                "embedded = CASE "
+                "WHEN excluded.text IS NOT NULL AND excluded.text != '' "
+                "     AND excluded.text != corpus_docs.text THEN 0 "
+                "WHEN corpus_docs.embedded = 1 THEN 1 "
+                "ELSE excluded.embedded END"
+            )
+        else:
+            set_clause_parts.append(f"{c}=excluded.{c}")
+    set_clause = ", ".join(set_clause_parts)
     placeholders = ", ".join("?" for _ in cols)
     conn.execute(
         f"INSERT INTO corpus_docs ({', '.join(cols)}) VALUES ({placeholders}) "
         f"ON CONFLICT(source, citation) DO UPDATE SET {set_clause}",
         [doc.get(c) for c in cols],
+    )
+
+
+def seed_entity(conn: sqlite3.Connection, entity: dict, seen_at: str) -> None:
+    """Insert or refresh an entity_procurement row from principalities-index source data.
+
+    Only the Census-sourced descriptive fields are touched here (name, state,
+    government_type, county, population, website, last_seen). Verification
+    fields (website_live, procurement_url, portal_platform, verify_status,
+    ...) are left alone if the row already exists -- seeding must never
+    clobber work the verifier job already did. first_seen/verify_status are
+    set only on first insert.
+    """
+    cols = ["entity_id", "name", "state_code", "government_type", "county",
+            "population", "website", "contact_email", "first_seen", "last_seen", "verify_status"]
+    row = {
+        "entity_id": entity["entity_id"],
+        "name": entity.get("name"),
+        "state_code": entity.get("state_code"),
+        "government_type": entity.get("government_type"),
+        "county": entity.get("county"),
+        "population": entity.get("population"),
+        "website": entity.get("website"),
+        "contact_email": entity.get("contact_email"),
+        "first_seen": seen_at,
+        "last_seen": seen_at,
+        "verify_status": "pending",
+    }
+    update_cols = ["name", "state_code", "government_type", "county",
+                   "population", "website", "contact_email", "last_seen"]
+    set_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+    placeholders = ", ".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO entity_procurement ({', '.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(entity_id) DO UPDATE SET {set_clause}",
+        [row[c] for c in cols],
+    )
+
+
+def record_verification(conn: sqlite3.Connection, entity_id: str, result: dict, checked_at: str) -> None:
+    """Write verifier-job results for one entity_procurement row. Row must already exist (seed_entity first)."""
+    cols = ["website_live", "website_status_code", "procurement_url",
+            "procurement_confidence", "portal_platform", "verify_status",
+            "error_detail", "meta_json"]
+    set_clause = ", ".join(f"{c} = ?" for c in cols)
+    conn.execute(
+        f"UPDATE entity_procurement SET {set_clause}, "
+        f"verify_attempts = verify_attempts + 1, last_verified_at = ?, last_seen = ? "
+        f"WHERE entity_id = ?",
+        [result.get(c) for c in cols] + [checked_at, checked_at, entity_id],
+    )
+
+
+def pending_entities(conn: sqlite3.Connection, state_code: str | None = None,
+                     limit: int | None = None) -> list[sqlite3.Row]:
+    """Rows still needing a verifier pass (verify_status='pending'), oldest-seeded first."""
+    where = "verify_status = 'pending'"
+    params: list = []
+    if state_code:
+        where += " AND state_code = ?"
+        params.append(state_code)
+    sql = f"SELECT * FROM entity_procurement WHERE {where} ORDER BY first_seen"
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    return conn.execute(sql, params).fetchall()
+
+
+def entity_procurement_stats(conn: sqlite3.Connection) -> dict:
+    total = conn.execute("SELECT COUNT(*) AS n FROM entity_procurement").fetchone()["n"]
+    by_status = {
+        r["verify_status"]: r["n"]
+        for r in conn.execute(
+            "SELECT verify_status, COUNT(*) AS n FROM entity_procurement GROUP BY verify_status"
+        ).fetchall()
+    }
+    by_platform = {
+        r["portal_platform"]: r["n"]
+        for r in conn.execute(
+            "SELECT portal_platform, COUNT(*) AS n FROM entity_procurement "
+            "WHERE portal_platform IS NOT NULL GROUP BY portal_platform ORDER BY n DESC"
+        ).fetchall()
+    }
+    return {"total": total, "by_status": by_status, "by_platform": by_platform}
+
+
+def record_far_citations(conn: sqlite3.Connection, entity_id: str, citations: list[str]) -> None:
+    """Store the compliance-scan result for one entity_procurement row (may be an empty list)."""
+    conn.execute(
+        "UPDATE entity_procurement SET far_citations_json = ? WHERE entity_id = ?",
+        (_dumps(citations), entity_id),
+    )
+
+
+def unscanned_verified_entities(conn: sqlite3.Connection, limit: int | None = None) -> list[sqlite3.Row]:
+    """Verified rows (real procurement_url) not yet compliance-scanned."""
+    sql = ("SELECT * FROM entity_procurement WHERE verify_status = 'verified' "
+           "AND far_citations_json IS NULL ORDER BY first_seen")
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    return conn.execute(sql).fetchall()
+
+
+def upsert_outreach_review(conn: sqlite3.Connection, row: dict, created_at: str) -> None:
+    """Insert or refresh a review-queue row keyed on entity_id. Never overwrites a human decision
+    (status stays approved/dismissed across re-runs unless the row is still pending_review)."""
+    cols = ["entity_id", "reason", "priority_score", "contact_email",
+            "draft_subject", "draft_body", "created_at"]
+    row = {**row, "created_at": created_at}
+    placeholders = ", ".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO outreach_review ({', '.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(entity_id) DO UPDATE SET "
+        f"reason=excluded.reason, priority_score=excluded.priority_score, "
+        f"contact_email=excluded.contact_email, draft_subject=excluded.draft_subject, "
+        f"draft_body=excluded.draft_body "
+        f"WHERE outreach_review.status = 'pending_review'",
+        [row[c] for c in cols],
+    )
+
+
+def review_queue(conn: sqlite3.Connection, status: str = "pending_review",
+                 limit: int = 100) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT o.*, e.name AS entity_name, e.state_code, e.county, e.government_type, "
+        "e.population, e.website, e.procurement_url, e.portal_platform "
+        "FROM outreach_review o JOIN entity_procurement e ON e.entity_id = o.entity_id "
+        "WHERE o.status = ? ORDER BY o.priority_score DESC LIMIT ?",
+        (status, limit),
+    ).fetchall()
+
+
+def decide_review(conn: sqlite3.Connection, review_id: int, status: str, decided_at: str) -> None:
+    """status must be 'approved' or 'dismissed' -- both are human decisions, never automatic."""
+    conn.execute(
+        "UPDATE outreach_review SET status = ?, decided_at = ? WHERE id = ?",
+        (status, decided_at, review_id),
     )
 
 
@@ -264,6 +605,7 @@ def counts(conn: sqlite3.Connection) -> dict:
         "runs": conn.execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"],
         "opportunities": conn.execute("SELECT COUNT(*) AS n FROM opportunities").fetchone()["n"],
         "corpus_docs": conn.execute("SELECT COUNT(*) AS n FROM corpus_docs").fetchone()["n"],
+        "entity_procurement": conn.execute("SELECT COUNT(*) AS n FROM entity_procurement").fetchone()["n"],
     }
 
 
