@@ -144,7 +144,9 @@ PLATFORM_SIGNATURES = {
 
 # Fallback: link text/href keywords when no known-platform domain is found --
 # still a real procurement-page candidate, just on a custom/plain-HTML site.
-PROCUREMENT_KEYWORDS = ["bid", "rfp", "rfq", "procurement", "purchasing", "solicitation", "vendor"]
+PROCUREMENT_KEYWORDS = ["bid", "rfp", "rfq", "procurement", "purchasing", "solicitation", "vendor",
+                        "opportunities", "opportunity", "notices", "notice", "doing business",
+                        "current bids", "open bids", "contract opportunities", "supplier"]
 
 _ANCHOR_RE = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.I | re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
