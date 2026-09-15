@@ -5,7 +5,7 @@
 
 [![Version](https://img.shields.io/badge/version-0.6-blue)]()
 [![License](https://img.shields.io/badge/license-PolyForm%20Shield%201.0-blue)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.11-blue)](https://www.python.org/)
 [![Audit](https://img.shields.io/badge/audit-3--round%20PASS--CLEAN-brightgreen)]()
 [![Status](https://img.shields.io/badge/status-production--ready-brightgreen)]()
 [![Sovereign](https://img.shields.io/badge/infra-sovereign--local-orange)]()
@@ -22,7 +22,7 @@ GovTech Hunter is a production-grade, multi-stage AI pipeline that monitors U.S.
 
 It runs unattended at 07:00 daily. It records every run to a local SQLite Observatory. It exposes a live FastAPI dashboard. It does not require cloud infrastructure.
 
-**This is not a scraping tool. This is not a POC.** This is 16 sessions of production engineering across 4+ months — v0.6, validated by a three-round AI audit (PASS-CLEAN, zero open findings of MEDIUM or higher severity).
+**This is not a scraping tool. This is not a POC.** This is production engineering across 7+ months and counting — v0.6, validated by a three-round AI audit (PASS-CLEAN as of June 2026) and continuously hardened since.
 
 ---
 
@@ -87,7 +87,7 @@ GovTech Hunter does all three in a single unattended pipeline run.
 ```
 llm_client.complete(prompt, mode="fast"|"precise")
 
-  1. Local LM Studio  ──→  OpenAI-compatible endpoint (localhost:1234)
+  1. Local Ollama     ──→  Native API (localhost:11434)
                            TCP availability check before dispatch
                            mode=fast    → LOCAL_MODEL_FAST  (env-configurable)
                            mode=precise → LOCAL_MODEL_PRECISE (env-configurable)
@@ -142,7 +142,7 @@ Built in v16 (2026-06-16). Verified auto-recording unattended.
 | `observatory/backfill.py` | Backfill historical runs |
 | `observatory/fulltext.py` | Full-text corpus search |
 
-74 govinfo documents seeded in v16. Surfaces which LLM tier served — caught local tier down for 3 days.
+Continuously ingested from govinfo.gov (Federal Register EOs, GAO reports) and eCFR (FAR/DFARS bulk XML). Surfaces which LLM tier served — caught local tier down for 3 days.
 
 ---
 
@@ -190,10 +190,10 @@ Built in v16 (2026-06-16). Verified auto-recording unattended.
 | GCP (all 5 projects) | DELETED — torn down 2026-06-06 |
 | Anthropic API | LIVE — claude-sonnet-4-6 direct SDK |
 | Venice AI | LIVE — llama-3.3-70b |
-| Local LM Studio | Configurable — env-driven model selection |
+| Local Ollama | LIVE — gemma4 (fast/precise tiers), env-driven model selection |
 | Legal Corpus (FAISS) | ON DISK — local sovereign (sample public / full set private) |
 | Observatory (SQLite) | LIVE — data/primordial.db, auto-recording |
-| GovTechHunterDaily | SCHEDULED — 07:00 Windows Task Scheduler |
+| GovTechHunterDaily | SCHEDULED — cron, 07:00 daily, confirmed firing unattended |
 
 **Sovereign-local stack.** No cloud dependency in the current architecture. Cloud infrastructure will be rebuilt when a FedRAMP customer, volume threshold, or collaborator trigger is met.
 
@@ -209,7 +209,7 @@ This codebase underwent a three-round AI audit in June 2026:
 | Round 2 | 5 new + 2 partials | Fixed in round 3 |
 | Round 3 | 0 new | **PASS-CLEAN** |
 
-Zero open findings of MEDIUM or higher severity at public release. The round-by-round commit trail is preserved in the published history; detailed findings reports are retained in the private engineering record.
+Zero open findings of MEDIUM or higher severity at the close of this audit. The round-by-round commit trail is preserved in the published history; detailed findings reports are retained in the private engineering record. Development has continued since — see commit history for what's changed.
 
 ---
 
@@ -223,18 +223,23 @@ Vector Search:     FAISS (faiss-cpu), nomic-embed-text-v1.5 (768d)
 Document Parsing:  pypdf, doc_fetcher (login-wall aware)
 API Layer:         FastAPI + uvicorn (Observatory dashboard)
 Data:              SQLite (Observatory), JSON (corpus, opportunities, shield)
-Task Scheduling:   Windows Task Scheduler (GovTechHunterDaily)
+Task Scheduling:   cron (Linux reference deployment); Windows Task Scheduler .ps1 path also included
 ```
 
 ---
 
 ## Companion Repositories
 
+Primordial Galaxy is the flagship application; these are its direct data/infra dependencies, each shipping a small real-data sample so the full chain runs end to end from the public repos alone:
+
 | Repo | Description |
 |------|-------------|
-| [`Rise-Of-The-Prompt-Kiddie`](https://github.com/apex-ronin/Rise-Of-The-Prompt-Kiddie) | 40-page technical whitepaper v2.1 — AI-enabled threat actors in GovTech (CC BY 4.0) — **public** |
+| [`legal-corpus`](https://github.com/apex-ronin/legal-corpus) | FAR/DFARS/CMMC clause corpus — sample public, full 104-clause set private |
+| [`principalities-index`](https://github.com/apex-ronin/principalities-index) | Census-of-Governments entity index — sample public, full 78k-entity set private |
+| [`data-arsenal`](https://github.com/apex-ronin/data-arsenal) | ETL / FAISS-index build pipeline — public |
+| [`Rise-Of-The-Prompt-Kiddie`](https://github.com/apex-ronin/Rise-Of-The-Prompt-Kiddie) | 40-page technical whitepaper v2.1 — AI-enabled threat actors in GovTech (CC BY 4.0) — public |
 
-> Additional components — the curated legal corpus, the vendor entity index, sovereign data pipeline infrastructure, and the R.O.N.I.N. / JARVIS core stack — are part of the **private commercial layer** and are not publicly available.
+> The R.O.N.I.N. / JARVIS general-purpose agent framework this project specializes remains a **private** repo — not part of the public core above.
 
 ---
 
@@ -243,29 +248,34 @@ Task Scheduling:   Windows Task Scheduler (GovTechHunterDaily)
 ```bash
 git clone https://github.com/apex-ronin/primordial-galaxy.git
 cd primordial-galaxy
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 # Fill in: ANTHROPIC_API_KEY, VENICE_API_KEY, SAM_API_KEY
 # Optional: LOCAL_LLM_BASE_URL, LLM_MODE, LOCAL_MODEL_FAST, LOCAL_MODEL_PRECISE
 
 # Run the full pipeline
-powershell .\run_scanner.ps1
+bash run_scanner.sh
 
 # Launch the Observatory dashboard (localhost:8787)
-powershell .\run_dashboard.ps1
+.venv/bin/python -m uvicorn observatory.server:app --port 8787
 
-# Register as a persistent boot service
-powershell .\register_boot_task.ps1
+# Schedule the daily unattended run (cron)
+crontab -e
+# 0 7 * * * /path/to/primordial-galaxy/run_scanner.sh >> logs/cron.log 2>&1
 
-# Air-gap / local LLM mode
-powershell .\start_local_llm.ps1
+# Air-gap / local LLM mode: install Ollama, then
+ollama pull gemma4:12b && ollama pull nomic-embed-text
+ollama serve
 ```
+
+> Scripts above target Linux/macOS (the reference deployment runs Ubuntu 22.04). `.ps1` equivalents (`run_scanner.ps1`, `run_dashboard.ps1`, `register_boot_task.ps1`, `start_local_llm.ps1`) are included in the repo for Windows use but are no longer the primary/tested path.
 
 ---
 
 ## Co-Authorship
 
-This system was designed and built in active collaboration between **Jay Nelson (Dopamine Ronin)** and **Claude (Anthropic)** across 16 sessions from February to June 2026 — architecture decisions, module design, audit passes, and production hardening done together.
+This system was designed and built in active collaboration between **Jay Nelson (Dopamine Ronin)** and **Claude (Anthropic)**, ongoing since February 2026 — architecture decisions, module design, audit passes, and production hardening done together.
 
 The commit history is the methodology section. The audit rounds are the results. The shipped pipeline is the conclusion.
 
@@ -294,12 +304,12 @@ If you found this repo to evade detection: wrong tool.
 | Phase | Period | Status |
 |-------|--------|--------|
 | POC — 47-hour sprint, live results | Feb 2026 | ✅ Complete |
-| Production build — 16 sessions, v0.6 | Feb–Jun 2026 | ✅ Complete |
-| Three-round AI audit (PASS-CLEAN) | Jun 2026 | ✅ Complete |
+| Production build, v0.6 | Feb 2026 – present | 🔄 Ongoing |
+| Three-round AI audit (PASS-CLEAN as of Jun 2026) | Jun 2026 | ✅ Complete |
 | Whitepaper v2.1 published | Jun 4, 2026 | ✅ Live |
 | Observatory built + verified unattended | Jun 16, 2026 | ✅ Live |
-| Air Force Tech Connect submission | In progress | 🔄 |
-| Public release | Jun 2026 | 🟢 Now |
+| Air Force Tech Connect submission | Package ready, gated on sustained pipeline reliability | ⏸ Not yet submitted |
+| Public release | Jun 2026 | ✅ Live |
 
 ---
 
