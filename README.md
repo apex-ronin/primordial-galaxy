@@ -1,28 +1,29 @@
 # 🛡️ GovTech Hunter — Primordial Galaxy
 
 > **Government contract intelligence + red team simulation system.**  
-> Scrapes public procurement sources → scores opportunities → generates adversarial threat assessments → drafts legally-grounded antibody clauses. Domain specialization layer of the R.O.N.I.N. / JARVIS stack.
+> Scrapes public procurement sources → scores opportunities → generates adversarial threat assessments → drafts candidate antibody clauses for human review (research prototype). Domain specialization layer of the R.O.N.I.N. / JARVIS stack.
 
 [![Version](https://img.shields.io/badge/version-0.6-blue)]()
 [![License](https://img.shields.io/badge/license-PolyForm%20Shield%201.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11-blue)](https://www.python.org/)
-[![Audit](https://img.shields.io/badge/audit-3--round%20PASS--CLEAN-brightgreen)]()
-[![Status](https://img.shields.io/badge/status-production--ready-brightgreen)]()
+[![Review](https://img.shields.io/badge/engineering%20review-3%20rounds%2C%20not%20product%20validation-lightgrey)]()
+[![Status](https://img.shields.io/badge/status-research%20prototype%20%7C%20pre--validation-orange)]()
 [![Sovereign](https://img.shields.io/badge/infra-sovereign--local-orange)]()
-[![Air Gap](https://img.shields.io/badge/deployment-air--gap%20ready-orange)]()
 [![GovTech](https://img.shields.io/badge/domain-GovTech%20%7C%20Defense-darkblue)]()
 
 ---
 
 ## What This Is
 
-GovTech Hunter is a production-grade, multi-stage AI pipeline that monitors U.S. government and California district procurement streams, scores each opportunity for fit and win probability, runs an adversarial red team simulation against every high-value target, and drafts legally-grounded contract defense clauses — anchored to a local FAR/DFARS/CMMC legal corpus with semantic FAISS retrieval.
+GovTech Hunter is a multi-stage AI pipeline (research prototype) that monitors U.S. government and California district procurement streams, scores each opportunity for fit and win probability, runs an adversarial red team simulation against every high-value target, and drafts candidate contract defense clauses for human review — drawing on to a local FAR/DFARS/CMMC legal corpus with semantic FAISS retrieval.
 
-> **Open-core:** the public repository ships the full pipeline plus a **runnable sample corpus**. The complete curated clause set, the validated "antibody" clause library, and the fraud→shield linkage are a **private, commercial layer** — see [License](#license).
+> **Open-core:** the public repository ships the full pipeline plus a **runnable sample corpus**. The complete curated clause set, the "antibody" clause library, and the fraud→shield linkage are a **private, commercial layer** — see [License](#license).
 
-It runs unattended at 07:00 daily. It records every run to a local SQLite Observatory. It exposes a live FastAPI dashboard. It does not require cloud infrastructure.
+It can be scheduled to run unattended (the example cron entry below runs at 07:00); scheduled runs are currently paused. It records every run to a local SQLite Observatory. It exposes a local FastAPI dashboard. It does not require cloud infrastructure.
 
-**This is not a scraping tool. This is not a POC.** This is production engineering across 7+ months and counting — v0.6, validated by a three-round AI audit (PASS-CLEAN as of June 2026) and continuously hardened since.
+> **Status: research prototype, pre-validation.** The antibody clause-drafting capability is unproven. No drafted clause has been reviewed by a human examiner, and no acceptance test has been run. Automated checks in the pipeline (grounding, specificity) are not a substitute for that review.
+
+This is more than a scraping tool: it is a multi-stage pipeline developed since early 2026 (v0.6). It went through a three-round AI engineering review in June 2026; see [Engineering Review Record](#engineering-review-record) for what that did and did not cover.
 
 ---
 
@@ -32,7 +33,7 @@ Fraud drains an estimated **$233–$521 billion from the U.S. federal government
 
 Defenders writing contract responses have no adversarial simulation layer — they don't know what attack vectors exist against their own bids until they lose or get audited. Existing tools score opportunities. None of them red-team your position and draft legally-cited defensive clauses before you submit.
 
-GovTech Hunter does all three in a single unattended pipeline run.
+GovTech Hunter attempts all three in a single pipeline run. The clause-drafting step is unproven; see the Status note above.
 
 ---
 
@@ -109,9 +110,9 @@ Zero `google.generativeai`, `google.cloud.aiplatform`, or `vertexai` calls anywh
 
 ## Legal Corpus & Antibody System
 
-**Corpus (open-core):** the public repo ships a **runnable sample** of the FAR/DFARS/CMMC clause set so the pipeline works out of the box. The **full curated corpus** — 104 clauses across FAR (incl. 52.240-93), DFARS, CMMC/cyber, data-rights, GSAR, small-business, IT/cloud, and California state clauses — plus the **validated antibody library** are the private, commercial layer. (Raw FAR/DFARS text is public-domain; the value is the curation, grounding, and validated drafts.)
+**Corpus (open-core):** the public repo ships a **runnable sample** of the FAR/DFARS/CMMC clause set so the pipeline works out of the box. The **full curated corpus** (104 clauses across FAR, DFARS, CMMC/cyber, data-rights, GSAR, small-business, IT/cloud, and California state clauses) and the **antibody library** are the private, commercial layer. The curated corpus has not been audited against primary text, and the antibody drafts have not been reviewed by a human examiner. (Raw FAR/DFARS text is public-domain.)
 
-**Retrieval:** Semantic search via local `nomic-embed-text-v1.5` (768d) FAISS index. Lexical keyword fallback for offline/air-gap operation.
+**Retrieval:** Semantic search via local `nomic-embed-text-v1.5` (768d) FAISS index. Falls back to lexical matching only if the embedder or index is unavailable.
 
 **Antibody Pipeline:**
 ```
@@ -125,6 +126,8 @@ Opportunity + Threat Assessment
 
 Status: VALIDATED | NEEDS_REVIEW | FAILED_GROUNDING
 ```
+
+`VALIDATED` here is an output label meaning a draft passed the pipeline's automated grounding and specificity checks. It does not mean a human examiner has reviewed or approved the clause.
 
 ---
 
@@ -165,7 +168,7 @@ Continuously ingested from govinfo.gov (Federal Register EOs, GAO reports) and e
 | `execution/doc_fetcher.py` | RFP document pull from posting pages (login-wall aware) |
 | `execution/gemini_analyst.py` | Opportunity scoring via cascade (name legacy — no Gemini/Vertex) |
 | `execution/health_check.py` | Pre-flight checks (aborts pipeline on critical failure) |
-| `execution/compliance/disclosure_template.py` | M-26-04 stamp_disclosure() — OMB AI policy compliance |
+| `execution/compliance/disclosure_template.py` | M-26-04 stamp_disclosure() — disclosure stamp helper (not a compliance certification) |
 | `execution/shared_utils.py` | antibody_prompt_sanitizer_v1, calculate_roi_safe |
 | `execution/seed_legal_corpus.py` | Legal corpus seeding + FAISS indexing |
 | `execution/discovery_engine.py` | ⚠ RETIRED — Vertex AI Search stub (datastore deleted 2026-06-06) |
@@ -193,23 +196,23 @@ Continuously ingested from govinfo.gov (Federal Register EOs, GAO reports) and e
 | Local Ollama | LIVE — gemma4 (fast/precise tiers), env-driven model selection |
 | Legal Corpus (FAISS) | ON DISK — local sovereign (sample public / full set private) |
 | Observatory (SQLite) | LIVE — data/primordial.db, auto-recording |
-| GovTechHunterDaily | SCHEDULED — cron, 07:00 daily, confirmed firing unattended |
+| GovTechHunterDaily | PAUSED — scheduled runs are on hold; previously ran unattended |
 
-**Sovereign-local stack.** No cloud dependency in the current architecture. Cloud infrastructure will be rebuilt when a FedRAMP customer, volume threshold, or collaborator trigger is met.
+**Sovereign-local stack.** No cloud dependency in the current architecture.
 
 ---
 
-## Audit Record
+## Engineering Review Record
 
-This codebase underwent a three-round AI audit in June 2026:
+This codebase underwent a three-round AI-assisted engineering review in June 2026. Its scope was engineering and safety plumbing (for example fetch safety, sandboxing, and failure behavior). It did not assess the quality of drafted clauses and is not validation of the product.
 
 | Round | Findings | Status |
 |-------|----------|--------|
 | Round 1 | 43 findings | Fixed in round 2 |
 | Round 2 | 5 new + 2 partials | Fixed in round 3 |
-| Round 3 | 0 new | **PASS-CLEAN** |
+| Round 3 | 0 new | Closed with no new findings |
 
-Zero open findings of MEDIUM or higher severity at the close of this audit. The round-by-round commit trail is preserved in the published history; detailed findings reports are retained in the private engineering record. Development has continued since — see commit history for what's changed.
+The June review closed with no open findings of MEDIUM or higher severity; later reviews have recorded further open findings. The round-by-round commit trail is preserved in the published history; detailed findings reports are retained in the private engineering record. Development has continued since — see commit history for what's changed.
 
 ---
 
@@ -264,7 +267,7 @@ bash run_scanner.sh
 crontab -e
 # 0 7 * * * /path/to/primordial-galaxy/run_scanner.sh >> logs/cron.log 2>&1
 
-# Air-gap / local LLM mode: install Ollama, then
+# Local LLM mode (designed to run against a local model; not tested in an air-gapped environment): install Ollama, then
 ollama pull gemma4:12b && ollama pull nomic-embed-text
 ollama serve
 ```
@@ -275,15 +278,13 @@ ollama serve
 
 ## Co-Authorship
 
-This system was designed and built in active collaboration between **Jay Nelson (Dopamine Ronin)** and **Claude (Anthropic)**, ongoing since February 2026 — architecture decisions, module design, audit passes, and production hardening done together.
+This system was designed and built in active collaboration between **Jay Nelson (Dopamine Ronin)** and **Claude (Anthropic)**, ongoing since February 2026 — architecture decisions, module design, review passes, and hardening done together.
 
-The commit history is the methodology section. The audit rounds are the results. The shipped pipeline is the conclusion.
+The commit history is the methodology section.
 
 ```
 Co-authored-by: Claude (Anthropic) <noreply@anthropic.com>
 ```
-
-A companion whitepaper on this human-AI co-architecture model is in development. The thesis: AI as genuine co-architect — not autocomplete — producing GovTech-audited, production-grade infrastructure. Documented in commits, verifiable in audit trails, live in production.
 
 ---
 
@@ -303,13 +304,14 @@ If you found this repo to evade detection: wrong tool.
 
 | Phase | Period | Status |
 |-------|--------|--------|
-| POC — 47-hour sprint, live results | Feb 2026 | ✅ Complete |
-| Production build, v0.6 | Feb 2026 – present | 🔄 Ongoing |
-| Three-round AI audit (PASS-CLEAN as of Jun 2026) | Jun 2026 | ✅ Complete |
+| POC — 47-hour sprint | Feb 2026 | ✅ Complete |
+| Prototype build, v0.6 | Feb 2026 – present | 🔄 Ongoing |
+| Three-round AI engineering review (scope: engineering, not clause quality) | Jun 2026 | ✅ Complete |
 | Whitepaper v2.1 published | Jun 4, 2026 | ✅ Live |
 | Observatory built + verified unattended | Jun 16, 2026 | ✅ Live |
 | Air Force Tech Connect submission | Package ready, gated on sustained pipeline reliability | ⏸ Not yet submitted |
 | Public release | Jun 2026 | ✅ Live |
+| Examiner review of drafted clauses; acceptance test | — | ⏸ Not started |
 
 ---
 
@@ -324,7 +326,6 @@ Core capabilities:
 - Multi-agent AI automation with sovereign-local LLM architecture
 - Anti-detection web intelligence and data pipeline engineering
 - Security red teaming and adversarial AI research
-- Air-gap and classified environment deployment readiness
 
 ---
 
@@ -332,10 +333,10 @@ Core capabilities:
 
 **PolyForm Shield 1.0.0** — source-available. You may read, run, modify, and self-host the software for any purpose **except** building a product that competes with it. See [LICENSE](LICENSE).
 
-The public repository ships a **sample corpus** only; the full curated legal corpus and the validated antibody library are a private, commercial layer.
+The public repository ships a **sample corpus** only; the full curated legal corpus and the antibody library are a private, commercial layer.
 
 Whitepaper: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 
 ---
 
-*Built to the standard government infrastructure demands: production-only, three-round audited, sovereign-local, no shortcuts.*
+*Research prototype. Open-core, source-available, sovereign-local architecture.*
